@@ -51,7 +51,7 @@ VPNGATE_MIRROR = os.environ.get(
     "https://raw.githubusercontent.com/fdciabdul/Vpngate-Scraper-API/main/json/data.json",
 )
 # 已部署的 Cloudflare Worker 检测接口 (GET /check?proxyip=host:port, 实测确认)
-WORKER_CHECK_URL = os.environ.get("CHECK_WORKER", "https://ch.helei.kdns.fr/check?sstp=vpn:vpn@")
+WORKER_CHECK_URL = os.environ.get("CHECK_WORKER", "https://chks5.8dy.xx.kg/check?sstp=vpn:vpn@")
 CONCURRENCY = max(1, int(os.environ.get("CHECK_CONCURRENCY", "32")))   # 与 Worker 网页端一致的并发模型
 CHECK_TIMEOUT = float(os.environ.get("CHECK_TIMEOUT", "90"))          # 单请求客户端超时 (秒)
 MAX_CHECK_NODES = int(os.environ.get("MAX_CHECK_NODES", "0"))         # 0=不限; 本地测试可设小值
@@ -407,7 +407,7 @@ def build_outputs(results, raw_count, sstp_count, source):
     return data
 
 
-CHAIN_URL = os.environ.get("CHAIN_URL", "https://jerylihub.github.io/gate/chains.txt")
+CHAIN_URL = os.environ.get("CHAIN_URL", "https://whua898.github.io/wh-gate/chains.txt")
 
 
 def build_chains_text(data):
@@ -466,7 +466,7 @@ EDGE_HOSTS = [
     if h.strip()
 ]
 
-HOSTS_URL = os.environ.get("HOSTS_URL", "https://jerylihub.github.io/gate/hosts.txt")
+HOSTS_URL = os.environ.get("HOSTS_URL", "https://whua898.github.io/wh-gate/hosts.txt")
 
 
 def build_hosts_text(data):
@@ -522,10 +522,12 @@ def build_hosts_text(data):
 
 
 # edgetunnel 完整订阅 (vless://) 配置
-EDT_UUID = os.environ.get("EDT_UUID", "a664b457-d1aa-4671-bcdd-ad2eb31414ec")
-EDT_DOMAIN = os.environ.get("EDT_DOMAIN", "xi.xiaohe.gv.uy")
+# EDT_UUID 不写死在源码里 (公开仓库会泄露 UUID, 别人拿到即可白嫖你的 edgetunnel):
+# 只从环境变量读取 —— CI 用仓库 Secret EDT_UUID 注入, 本地用环境变量; 为空时不生成 sub.txt
+EDT_UUID = os.environ.get("EDT_UUID", "").strip().lower()
+EDT_DOMAIN = os.environ.get("EDT_DOMAIN", "wh-edd.8dy.xx.kg")
 EDT_FINGERPRINT = os.environ.get("EDT_FINGERPRINT", "chrome")
-SUB_URL = os.environ.get("SUB_URL", "https://jerylihub.github.io/gate/sub.txt")
+SUB_URL = os.environ.get("SUB_URL", "https://whua898.github.io/wh-gate/sub.txt")
 
 
 def _b64_secret_encode(plaintext, secret):
@@ -563,6 +565,8 @@ def _socks5_account(address, default_port=80):
 def build_sub_text(data):
     """生成 edgetunnel 完整 vless:// 订阅 (链式代理编码在 path)。
     填进 edgetunnel 后台「订阅链接」URL, 客户端定时拉取即可自动轮换。"""
+    if not EDT_UUID:
+        die("EDT_UUID 未设置, 无法生成 sub.txt (订阅含 UUID, 请通过环境变量/Secret 注入)")
     countries = data["countries"]
     lines = [
         "# edgetunnel 完整订阅 (vless://) —— 填进后台「订阅链接」URL",
@@ -632,10 +636,19 @@ def write_outputs(data):
     with open(hosts_path, "w", encoding="utf-8") as f:
         f.write(build_hosts_text(data))
 
-    # 完整 vless:// 订阅 (填进后台「订阅链接」URL, 客户端自动轮换)
-    sub_path = os.path.join(PUBLIC_DIR, "sub.txt")
-    with open(sub_path, "w", encoding="utf-8") as f:
-        f.write(build_sub_text(data))
+    # 完整 vless:// 订阅: 含 UUID, 默认不发布到公开 Pages (泄露 UUID = 别人可白嫖你的 edgetunnel)
+    # 需要时设 PUBLISH_SUB=1 且提供 EDT_UUID (CI 走仓库 Secret); 用 edgetunnel 后台自带的订阅地址则无需开启
+    sub_path = None
+    stale_sub = os.path.join(PUBLIC_DIR, "sub.txt")
+    if os.environ.get("PUBLISH_SUB", "").strip().lower() in ("1", "true", "yes") and EDT_UUID:
+        sub_path = stale_sub
+        with open(sub_path, "w", encoding="utf-8") as f:
+            f.write(build_sub_text(data))
+    else:
+        log("SUB", "跳过 sub.txt: 默认不公开发布 (需要时设 PUBLISH_SUB=1 + 环境变量 EDT_UUID)")
+        if os.path.exists(stale_sub):
+            os.remove(stale_sub)
+            log("SUB", "已清理上一版残留的公开 sub.txt")
     return data_path, html_path, chains_path, hosts_path, sub_path
 
 

@@ -80,12 +80,13 @@ VPN Gate 官方源
 | :--- | :--- | :--- | :--- |
 | .github/workflows/check.yml | env 里的 CHECK_WORKER | 你的检测 Worker 域名，形如 https://xxx.workers.dev/check?sstp=vpn:vpn@ | 检测统一走你自己的 Worker |
 | vpngate.py | 约 515 行 EDT_DOMAIN | 你的 edgetunnel 域名 | 链式代理入口的 SNI/host |
-| vpngate.py | 约 514 行 EDT_UUID | 你的 edgetunnel UUID | 链式代理编码密钥 |
+| 仓库 Secret `EDT_UUID`（环境变量） | — | 你的 edgetunnel UUID | **源码不保存真值**；仅在需要生成公开 sub.txt 时注入 |
 | vpngate.py | 约 455 行 EDGE_HOSTS | 你测出来的优选域名 | 入口用谁，决定稳不稳 |
-| vpngate.py | CHAIN_URL / HOSTS_URL / SUB_URL | 把里面写死的固定地址换成 你的用户名/仓库名 | 清单注释头里的固定地址 |
+| vpngate.py | CHAIN_URL / HOSTS_URL | 把里面写死的固定地址换成 你的用户名/仓库名 | 清单注释头里的固定地址（sub.txt 默认不发布，见「六、安全与隐私」） |
+| 仓库 Secret `CHECK_TOKEN` | — | 检测 Worker 的密钥路径，与 Worker 的 `AUTH_PATH` 变量同值 | 防止公开的检测地址被第三方白嫖 |
 | .github/workflows/check.yml | 最后的 Show site URL | 把里面写死的站点地址换成你的 | 运行日志里显示的站点地址 |
 
-> CHECK_WORKER 通过 workflow 环境变量传给脚本、会覆盖 vpngate.py 里的默认值，所以检测 Worker 域名只需在 workflow 里改一处。EDT_DOMAIN / EDT_UUID / EDGE_HOSTS 是 vpngate.py 里的默认值，直接改源码。
+> CHECK_WORKER 通过 workflow 环境变量传给脚本、会覆盖 vpngate.py 里的默认值，所以检测 Worker 域名只需在 workflow 里改一处。EDT_DOMAIN / EDGE_HOSTS 是 vpngate.py 里的默认值，直接改源码；**EDT_UUID 不进源码**，用仓库 Secret 注入（见「六、安全与隐私」）。
 
 ### 第 4 步：开启 GitHub Pages 与 Actions
 
@@ -124,12 +125,36 @@ https://你的GitHub用户名.github.io/仓库名/hosts.txt
 6. 客户端里更新/刷新订阅（订阅地址是 edgetunnel 后台给你的那个）
 7. 测延迟，选一个节点用
 
+### 自动同步（推荐，免手工复制粘贴）
+
+上面第 1~5 步可以用仓库自带的 `push_edt_hosts.py` 一键完成：下载 hosts.txt → 登录后台 → 追加到「自定义优选IP」末尾 → 保存 → 回读校验（确认右下角那句「自定义IP已保存」的接口返回）。
+
+```bash
+# 1. 预览（只下载+合并，不连后台，无需密码）
+python push_edt_hosts.py --dry-run
+
+# 2. 同步一次（密码交互式输入、不回显；也可用环境变量 EDT_ADMIN_PASSWORD）
+python push_edt_hosts.py
+
+# 3. 常驻模式：每 30 分钟自动同步一次（与节点更新频率一致）
+python push_edt_hosts.py --watch
+```
+
+说明：
+
+- 后台地址默认读 `vpngate.py` 的 `EDT_DOMAIN`，可用 `--base https://你的域名` 或环境变量 `EDT_BASE` 覆盖
+- 密码就是 edgetunnel Worker 上的 `ADMIN` 环境变量；脚本不会把它打印出来
+- 重复运行**不会无限追加**：每次同步前先清掉上一轮的自动块和同名旧条目（名字固定、地址换新的语义），你自己填的其它内容原样保留在前面
+- hosts.txt 主地址（本仓库 Pages）404 时自动回退到在线的备用地址，两边都挂才报错退出（退出码 1，不会假成功）
+
+**接入 GitHub Actions 做到全自动**：仓库 Settings → Secrets and variables → Actions → New repository secret，添加 `EDT_ADMIN_PASSWORD`（可选再加 `EDT_BASE`）。之后每 30 分钟 workflow 跑完会自动推送后台；未配置该 Secret 时这一步自动跳过，不影响原有流水线。
+
 ### 节点名含义
 
 节点名格式：国家-住宅-编号 / 国家-机房-编号，例如 日本-住宅-01、韩国-机房-02。住宅和机房各自独立编号，一眼区分。
 
 ### 每 30 分钟更新
-节点每 30 分钟换一批，想换新节点时：重新打开 hosts.txt → 全选复制 → 覆盖粘贴。名字保持不变，只是背后的节点地址换了。
+节点每 30 分钟换一批，想换新节点时：重新打开 hosts.txt → 全选复制 → 覆盖粘贴。名字保持不变，只是背后的节点地址换了。懒得手动弄就用上面的 `python push_edt_hosts.py --watch`（或配置 Secret `EDT_ADMIN_PASSWORD` 交给 Actions），每 30 分钟自动替换后台里的旧条目。
 
 ---
 
@@ -172,7 +197,7 @@ EDGE_HOSTS = [
 | :--- | :--- | :--- |
 | EDGE_HOSTS | 455 行 | 入口优选域名（换域名改这里） |
 | EDT_DOMAIN | 515 行 | 你的 edgetunnel 域名 |
-| EDT_UUID | 514 行 | 你的 edgetunnel UUID |
+| EDT_UUID | 环境变量 / Secret | edgetunnel UUID；**源码不保存真值**，未设置时不生成 sub.txt |
 | EDT_FINGERPRINT | 516 行 | TLS 指纹（默认 chrome） |
 | WORKER_CHECK_URL | 54 行 | 检测 Worker（本地运行默认值，Action 里用 workflow 的 CHECK_WORKER 覆盖） |
 | COUNTRY_ZH | 78 行 | 国家中文名映射 |
@@ -192,6 +217,15 @@ EDGE_HOSTS = [
 
 ### 检测 Worker 报错
 确认 Worker 部署成功、域名填对（workflow 里的 CHECK_WORKER），浏览器直接访问 https://你的Worker/check?sstp=... 看是否返回 JSON。
+
+---
+
+## 六、安全与隐私
+
+- **UUID 不落源码**：`EDT_UUID` 只从环境变量/仓库 Secret 读取，源码里没有真值——公开仓库被翻到底也拿不到你的 UUID。
+- **sub.txt 默认不发布**：它含完整 `vless://` 链接（等于 UUID），默认跳过生成并清理历史残留。`hosts.txt` / `chains.txt` 不含 UUID，可放心公开。确需公开订阅时：设 `PUBLISH_SUB=1` + Secret `EDT_UUID`（代价是 UUID 随之公开，可被他人拿去连你的 edgetunnel）。
+- **检测 Worker 加密钥路径**：Worker 侧设置 `AUTH_PATH` 变量后，所有请求必须以 `/<密钥>` 开头否则 404；本仓库 workflow 用 Secret `CHECK_TOKEN` 组装地址（与 `AUTH_PATH` 同值），未配 Secret 时回退裸地址。详见检测 Worker 仓库的 `_worker.js` 注释。
+- **后台 ADMIN 密码**：用长随机串（不要用用户名）。修改密码前先到 CF 面板确认已固定 `UUID` 环境变量，否则 UUID 会随密码变化、所有订阅链接失效。
 
 ---
 
