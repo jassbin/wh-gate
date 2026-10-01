@@ -716,7 +716,8 @@ def main():
     log("WEBSITE", f"生成 {os.path.relpath(html_path, REPO_DIR)}")
     log("WEBSITE", f"生成 {os.path.relpath(chains_path, REPO_DIR)}")
     log("WEBSITE", f"生成 {os.path.relpath(hosts_path, REPO_DIR)}")
-    log("WEBSITE", f"生成 {os.path.relpath(sub_path, REPO_DIR)}")
+    if sub_path is not None:
+        log("WEBSITE", f"生成 {os.path.relpath(sub_path, REPO_DIR)}")
     log("WEBSITE", "完成 (GitHub Pages 部署由 workflow 执行)")
 
 
