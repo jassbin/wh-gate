@@ -7,9 +7,10 @@ VPN Gate SSTP 节点检测流水线
   2. 只保留「带 TCP 入口」的中继 = SSTP 可用节点
      (OpenVPN 配置里 proto tcp + remote <ip> <port>; UDP-only 中继无法走 SSTP/xray 链, 直接丢弃)
   3. 按 host+port+protocol 去重
-  4. 并发调用已部署的 Cloudflare Worker:  GET {WORKER}/check?proxyip=host:port
+  4. 并发调用已部署的 Cloudflare Worker:  GET {WORKER}/check?sstp=vpn:vpn@host:port (WORKER 由 CHECK_WORKER 环境变量传入, 可含 /<密钥> 前缀)
      (单节点 HTTP 成功 != 节点可用; 以 Worker 返回 JSON 的 success 字段为准)
   5. 保留 success=true 的节点, 按国家分组, 生成 public/data.json + public/index.html
+      + public/chains.txt + public/hosts.txt (EDT_UUID + PUBLISH_SUB=1 时才另生成 public/sub.txt)
   6. 网页端 (GitHub Pages) 读取 data.json 展示
 
 退出码:
@@ -60,7 +61,7 @@ VPNGATE_MIRROR = _env(
     "VPNGATE_MIRROR",
     "https://raw.githubusercontent.com/fdciabdul/Vpngate-Scraper-API/main/json/data.json",
 )
-# 已部署的 Cloudflare Worker 检测接口 (GET /check?proxyip=host:port, 实测确认)
+# 已部署的 Cloudflare Worker 检测接口 (GET /check?sstp=vpn:vpn@host:port, 实测确认)
 WORKER_CHECK_URL = _env("CHECK_WORKER", "https://chks5.8dy.xx.kg/check?sstp=vpn:vpn@")
 CONCURRENCY = max(1, int(os.environ.get("CHECK_CONCURRENCY", "32")))   # 与 Worker 网页端一致的并发模型
 CHECK_TIMEOUT = float(os.environ.get("CHECK_TIMEOUT", "90"))          # 单请求客户端超时 (秒)
@@ -429,7 +430,7 @@ def build_chains_text(data):
         f"# 自动更新: {data['generated_at']} (每 30 分钟重新检测)",
         f"# 固定地址: {CHAIN_URL}",
         "#",
-        "# 用法: 在 edgetunnel 节点备注里直接粘贴下面任意一行 (名字与指令连写)",
+        "# 用法: 在 edgetunnel 节点备注里直接粘贴下面任意一行 (名字与指令连写, 逗号分隔多行)",
         "#   例: 日本-住宅-01$sstp://vpn:vpn@vpnxxx.opengw.net:443",
         "# 名字保持不变, 只有 $sstp:// 后面的地址每 30 分钟自动更换",
         "# 账号密码固定 vpn:vpn ; 端口必须保留",
@@ -483,7 +484,7 @@ def build_hosts_text(data):
     """生成可直接粘贴到 edgetunnel 后台「自定义优选IP」框的清单。
     每行 = 入口地址#名字$sstp://... ; 名字固定, 底下 SSTP 节点每 30 分钟自动换。"""
     countries = data["countries"]
-    # 入口: 默认用 7 个实测可用优选域名循环分配; 可用 HOSTS_ENTRY 覆盖(逗号分隔)
+    # 入口: 优选域名循环分配; 可用 HOSTS_ENTRY 覆盖(逗号分隔), 用 EDGE_HOSTS 环境变量覆盖整张默认表
     _entry = os.environ.get("HOSTS_ENTRY", "").strip()
     edge = [e.strip() for e in _entry.split(",") if e.strip()] or EDGE_HOSTS or [f"{EDT_DOMAIN}:443"]
     lines = [

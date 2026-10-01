@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write # 回写 .github/last-run.txt 需要写权限 (防 60 天停用定时任务)
   pages: write
   id-token: write
 
@@ -22,6 +22,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # 回写 commit 需要完整历史 (pull --rebase 用)
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -90,3 +92,27 @@ jobs:
             exit 0
           fi
           python push_edt_hosts.py
+
+      - name: Commit run state (keep scheduled workflow alive)
+        # 每 30 分钟跑一次也产生一次 commit -> 仓库永远有"活动",
+        # 防止 GitHub 因"公开仓库 60 天无活动"自动停用定时任务。
+        # 这只是触发器，不影响 push 并发（失败时不阻塞）。
+        # 只有定时触发才提交, 手动 workflow_dispatch 不提交。
+        if: github.event_name == 'schedule'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          mkdir -p .github
+          TS=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+          echo "$TS" > .github/last-run.txt
+          git add .github/last-run.txt
+          if git diff --cached --quiet; then
+            echo "nothing to commit"
+            exit 0
+          fi
+          git commit -m "chore: scheduled run at $TS [skip ci]"
+          for i in 1 2 3 4 5; do
+            git pull --rebase origin main && git push origin HEAD:main && break
+            echo "push 冲突, 重试 $i/5 ..."
+            sleep 10
+          done
