@@ -89,8 +89,13 @@ def default_base():
 
 
 def default_hosts_urls():
-    """hosts.txt 地址列表 (按顺序尝试): HOSTS_URL > vpngate.py > 上游在线地址兜底"""
+    """hosts.txt 来源列表 (按顺序尝试):
+    HOSTS_FILE (本地文件, CI 里指刚生成的 public/hosts.txt) > HOSTS_URL > vpngate.py > 上游在线地址兜底
+    """
     urls = []
+    env_file = os.environ.get("HOSTS_FILE", "").strip()
+    if env_file:
+        urls.append(env_file)
     env_url = os.environ.get("HOSTS_URL", "").strip()
     if env_url:
         urls.append(env_url)
@@ -113,14 +118,30 @@ def default_hosts_urls():
 # ---------------------------------------------------------------------------
 # 第 1 步: 下载 hosts.txt
 # ---------------------------------------------------------------------------
+def _read_source(url):
+    """读取一个来源。支持 http(s):// 与本地路径 / file://
+    (CI 里直接读本次刚生成的 public/hosts.txt, 不依赖 GitHub Pages CDN 生效延迟)。"""
+    if url.startswith("file://"):
+        path = url[7:]
+    elif "://" not in url:
+        path = url
+    else:
+        path = None
+    if path is not None:
+        log("HOSTS", f"读取本地: {path}")
+        with open(path, "r", encoding="utf-8") as fh:
+            return fh.read()
+    log("HOSTS", f"下载: {url}")
+    resp = requests.get(url, timeout=HTTP_TIMEOUT, headers={"User-Agent": UA})
+    resp.raise_for_status()
+    return resp.text
+
+
 def fetch_hosts(urls):
-    """按顺序尝试所有地址, 返回 (content, url)。全部失败 -> die。"""
+    """按顺序尝试所有来源, 返回 (content, url)。全部失败 -> die。"""
     for url in urls:
         try:
-            log("HOSTS", f"下载: {url}")
-            resp = requests.get(url, timeout=HTTP_TIMEOUT, headers={"User-Agent": UA})
-            resp.raise_for_status()
-            text = resp.text
+            text = _read_source(url)
             # 基本健全性: 必须有链式代理指令, 否则可能是 404 页/登录页
             if "$sstp://" not in text:
                 log("HOSTS", "  跳过: 内容不像 hosts.txt (缺少 $sstp:// 条目)")

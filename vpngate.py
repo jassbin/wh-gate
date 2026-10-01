@@ -44,14 +44,24 @@ for _stream in (sys.stdout, sys.stderr):
 # ---------------------------------------------------------------------------
 REPO_DIR = os.path.dirname(os.path.abspath(__file__))
 
-VPNGATE_API = os.environ.get("VPNGATE_API", "http://www.vpngate.net/api/iphone/")
+
+def _env(name, default=""):
+    """读取环境变量并去掉其中所有空白字符。
+
+    CI 里这些值由仓库 Secret 拼装而成, Secret 若混入换行/空格会破坏 URL
+    (实测: CHECK_TOKEN 带尾部换行 -> 拼出的 CHECK_WORKER 含换行 -> 全部请求异常)。
+    """
+    return "".join(os.environ.get(name, default).split())
+
+
+VPNGATE_API = _env("VPNGATE_API", "http://www.vpngate.net/api/iphone/")
 # 官方接口失败时的回退数据源: 预解析 JSON 镜像 (字段与官方 CSV 同源)
-VPNGATE_MIRROR = os.environ.get(
+VPNGATE_MIRROR = _env(
     "VPNGATE_MIRROR",
     "https://raw.githubusercontent.com/fdciabdul/Vpngate-Scraper-API/main/json/data.json",
 )
 # 已部署的 Cloudflare Worker 检测接口 (GET /check?proxyip=host:port, 实测确认)
-WORKER_CHECK_URL = os.environ.get("CHECK_WORKER", "https://chks5.8dy.xx.kg/check?sstp=vpn:vpn@")
+WORKER_CHECK_URL = _env("CHECK_WORKER", "https://chks5.8dy.xx.kg/check?sstp=vpn:vpn@")
 CONCURRENCY = max(1, int(os.environ.get("CHECK_CONCURRENCY", "32")))   # 与 Worker 网页端一致的并发模型
 CHECK_TIMEOUT = float(os.environ.get("CHECK_TIMEOUT", "90"))          # 单请求客户端超时 (秒)
 MAX_CHECK_NODES = int(os.environ.get("MAX_CHECK_NODES", "0"))         # 0=不限; 本地测试可设小值
@@ -407,7 +417,7 @@ def build_outputs(results, raw_count, sstp_count, source):
     return data
 
 
-CHAIN_URL = os.environ.get("CHAIN_URL", "https://whua898.github.io/wh-gate/chains.txt")
+CHAIN_URL = _env("CHAIN_URL", "https://whua898.github.io/wh-gate/chains.txt")
 
 
 def build_chains_text(data):
@@ -466,7 +476,7 @@ EDGE_HOSTS = [
     if h.strip()
 ]
 
-HOSTS_URL = os.environ.get("HOSTS_URL", "https://whua898.github.io/wh-gate/hosts.txt")
+HOSTS_URL = _env("HOSTS_URL", "https://whua898.github.io/wh-gate/hosts.txt")
 
 
 def build_hosts_text(data):
@@ -524,10 +534,10 @@ def build_hosts_text(data):
 # edgetunnel 完整订阅 (vless://) 配置
 # EDT_UUID 不写死在源码里 (公开仓库会泄露 UUID, 别人拿到即可白嫖你的 edgetunnel):
 # 只从环境变量读取 —— CI 用仓库 Secret EDT_UUID 注入, 本地用环境变量; 为空时不生成 sub.txt
-EDT_UUID = os.environ.get("EDT_UUID", "").strip().lower()
-EDT_DOMAIN = os.environ.get("EDT_DOMAIN", "wh-edd.8dy.xx.kg")
-EDT_FINGERPRINT = os.environ.get("EDT_FINGERPRINT", "chrome")
-SUB_URL = os.environ.get("SUB_URL", "https://whua898.github.io/wh-gate/sub.txt")
+EDT_UUID = _env("EDT_UUID", "").lower()
+EDT_DOMAIN = _env("EDT_DOMAIN", "wh-edd.8dy.xx.kg")
+EDT_FINGERPRINT = _env("EDT_FINGERPRINT", "chrome")
+SUB_URL = _env("SUB_URL", "https://whua898.github.io/wh-gate/sub.txt")
 
 
 def _b64_secret_encode(plaintext, secret):

@@ -80,6 +80,8 @@ jobs:
         env:
           EDT_BASE: ${{ secrets.EDT_BASE }}
           EDT_ADMIN_PASSWORD: ${{ secrets.EDT_ADMIN_PASSWORD }}
+          # 优先用本次刚生成的本地文件 (不依赖 Pages CDN 生效延迟), 再回退在线地址/上游
+          HOSTS_FILE: public/hosts.txt
           HOSTS_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/hosts.txt
         run: |
           if [ -z "$EDT_ADMIN_PASSWORD" ]; then
