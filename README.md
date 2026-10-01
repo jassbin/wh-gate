@@ -125,20 +125,17 @@ https://你的GitHub用户名.github.io/仓库名/hosts.txt
 6. 客户端里更新/刷新订阅（订阅地址是 edgetunnel 后台给你的那个）
 7. 测延迟，选一个节点用
 
-### 自动同步（推荐，免手工复制粘贴）
+### 自动同步（GitHub 全自动，本机无需常驻）
 
-上面第 1~5 步可以用仓库自带的 `push_edt_hosts.py` 一键完成：下载 hosts.txt → 登录后台 → 追加到「自定义优选IP」末尾 → 保存 → 回读校验（确认右下角那句「自定义IP已保存」的接口返回）。
+上面第 1~5 步已由 GitHub Actions 全自动完成，无需本机跑任何东西。
+工作原理：本仓库 `VPN Gate Node Check` workflow 每 30 分钟运行一次 ——
+拉节点 → 检测 → 生成 `hosts.txt` → 发布到 Pages → 同步进 edgetunnel 后台「自定义优选IP」。
+你唯一要做的就是第 6 步：在客户端里更新/刷新订阅。
 
-```bash
-# 1. 预览（只下载+合并，不连后台，无需密码）
-python push_edt_hosts.py --dry-run
-
-# 2. 同步一次（密码交互式输入、不回显；也可用环境变量 EDT_ADMIN_PASSWORD）
-python push_edt_hosts.py
-
-# 3. 常驻模式：每 30 分钟自动同步一次（与节点更新频率一致）
-python push_edt_hosts.py --watch
-```
+配置（都已配好，改动时才需要）：
+- `Secrets`：`EDT_ADMIN_PASSWORD`（edgetunnel 后台密码，必填）、`CHECK_TOKEN`（检测 Worker 的路径密钥，必填）
+- 仓库/Pages 保持公开，Actions 分钟免费无上限；无需本机计划任务或 `--watch`。
+- `push_edt_hosts.py` 仅用于本地手动预览/调试：`python push_edt_hosts.py --dry-run`（只下载+合并，不连后台）；本地同步一次 `python push_edt_hosts.py`（密码交互式输入）。
 
 说明：
 
@@ -154,7 +151,7 @@ python push_edt_hosts.py --watch
 节点名格式：国家-住宅-编号 / 国家-机房-编号，例如 日本-住宅-01、韩国-机房-02。住宅和机房各自独立编号，一眼区分。
 
 ### 每 30 分钟更新
-节点每 30 分钟换一批，想换新节点时：重新打开 hosts.txt → 全选复制 → 覆盖粘贴。名字保持不变，只是背后的节点地址换了。懒得手动弄就用上面的 `python push_edt_hosts.py --watch`（或配置 Secret `EDT_ADMIN_PASSWORD` 交给 Actions），每 30 分钟自动替换后台里的旧条目。
+节点每 30 分钟换一批，想换新节点时：在客户端里更新/刷新一下订阅就行（workflow 已自动把新 hosts.txt 推进后台，旧条目自动替换）。
 
 ---
 
