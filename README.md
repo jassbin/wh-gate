@@ -1,6 +1,6 @@
 # VPN Gate SSTP 节点自动优选（edgetunnel 链式代理）
 
-自动抓取 [VPN Gate](https://www.vpngate.net/) 的 SSTP 节点，调用检测 Worker 逐个验证可用性，按国家分组、标注住宅/机房，生成可直接粘贴进 edgetunnel 后台的链式代理清单。**每 30 分钟自动更新一次。**
+自动抓取 [VPN Gate](https://www.vpngate.net/) 的 SSTP 节点，调用检测 Worker 逐个验证可用性，按国家分组（仅收录住宅 IP，非住宅场景用 ed 其他节点），生成可直接粘贴进 edgetunnel 后台的链式代理清单。**每 30 分钟自动更新一次。**
 
 > 核心价值：VPN Gate 的 SSTP 节点 30 分钟就换一批，手动测试筛选太痛苦。本仓库把它全自动了——GitHub Actions 每 30 分钟自动检测并推送进 edgetunnel 后台，你只需在客户端里更新订阅。
 
@@ -32,7 +32,7 @@ VPN Gate 官方源
       │  GET /<密钥>/check?sstp=vpn:vpn@host:port（密钥路径见第 1 步第 6 点）
       │  返回 success + 出口 IP(住宅/机房判定)
       ▼
-保留成功节点 → 按国家分组 → 住宅/机房标注（住宅/机房各自独立编号） → 延迟排序
+保留成功节点 → 仅收录住宅（机房/未知丢弃） → 按国家分组 → 延迟排序
       │
       ▼
 生成 hosts.txt + chains.txt + data.json + index.html (走 GitHub Pages 发布)
@@ -139,14 +139,14 @@ https://你的GitHub用户名.github.io/仓库名/hosts.txt
 
 - 后台地址默认读 `vpngate.py` 的 `EDT_DOMAIN`，可用 `--base https://你的域名` 或环境变量 `EDT_BASE` 覆盖
 - 密码就是 edgetunnel Worker 上的 `ADMIN` 环境变量；脚本不会把它打印出来
-- 重复运行**不会无限追加**：每次同步前先清掉上一轮的自动块和同名旧条目（名字固定、地址换新的语义），你自己填的其它内容原样保留在前面
+- 重复运行**不会无限追加**：每次同步前先清掉上一轮的自动块、同名旧条目和早期「机房」遗留条目（名字固定、地址换新的语义），你自己填的其它内容原样保留在前面
 - hosts.txt 主地址（本仓库 Pages）404 时自动回退到在线的备用地址，两边都挂才报错退出（退出码 1，不会假成功）
 
 **接入 GitHub Actions 做到全自动**：仓库 Settings → Secrets and variables → Actions → New repository secret，添加 `EDT_ADMIN_PASSWORD`（可选再加 `CHECK_TOKEN`、`EDT_BASE`）。之后每 30 分钟 workflow 跑完会自动推送后台；未配置 `EDT_ADMIN_PASSWORD` 时这一步自动跳过，不影响原有流水线。
 
 ### 节点名含义
 
-节点名格式：国家-住宅-编号 / 国家-机房-编号，例如 日本-住宅-01、韩国-机房-02。住宅和机房各自独立编号，一眼区分。
+节点名格式：国家-住宅-编号，例如 日本-住宅-01。仅收录住宅 IP；非住宅需求用 ed 其他节点补。
 
 ### 每 30 分钟更新
 节点每 30 分钟换一批，想换新节点时：在客户端里更新/刷新一下订阅就行（workflow 已自动把新 hosts.txt 推进后台，旧条目自动替换）。

@@ -9,7 +9,7 @@ VPN Gate SSTP 节点检测流水线
   3. 按 host+port+protocol 去重
   4. 并发调用已部署的 Cloudflare Worker:  GET {WORKER}/check?sstp=vpn:vpn@host:port (WORKER 由 CHECK_WORKER 环境变量传入, 可含 /<密钥> 前缀)
      (单节点 HTTP 成功 != 节点可用; 以 Worker 返回 JSON 的 success 字段为准)
-  5. 保留 success=true 的节点, 按国家分组, 生成 public/data.json + public/index.html
+  5. 只保留 success=true 且住宅 (residential) 的节点 (机房/未知丢弃), 按国家分组, 生成 public/data.json + public/index.html
       + public/chains.txt + public/hosts.txt (EDT_UUID + PUBLISH_SUB=1 时才另生成 public/sub.txt)
   6. 网页端 (GitHub Pages) 读取 data.json 展示
 
@@ -66,6 +66,9 @@ WORKER_CHECK_URL = _env("CHECK_WORKER", "https://chks5.8dy.xx.kg/check?sstp=vpn:
 CONCURRENCY = max(1, int(os.environ.get("CHECK_CONCURRENCY", "32")))   # 与 Worker 网页端一致的并发模型
 CHECK_TIMEOUT = float(os.environ.get("CHECK_TIMEOUT", "90"))          # 单请求客户端超时 (秒)
 MAX_CHECK_NODES = int(os.environ.get("MAX_CHECK_NODES", "0"))         # 0=不限; 本地测试可设小值
+# 下发过滤: 只要住宅 (residential), 丢弃机房/未知; 用 ed 其他节点补非住宅场景
+# 环境变量 ONLY_RESIDENTIAL=0 可关闭 (默认 1 = 只收录住宅)
+ONLY_RESIDENTIAL = os.environ.get("ONLY_RESIDENTIAL", "1").strip().lower() in ("1", "true", "yes")
 HTTP_TIMEOUT = int(os.environ.get("HTTP_TIMEOUT", "60"))              # 拉取数据源超时
 PUBLIC_DIR = os.environ.get("PUBLIC_DIR", os.path.join(REPO_DIR, "public"))
 TEMPLATE_HTML = os.path.join(REPO_DIR, "web", "index.html")
@@ -382,7 +385,15 @@ def check_all(nodes, session):
 # 第 4 步: 生成网页数据
 # ---------------------------------------------------------------------------
 def build_outputs(results, raw_count, sstp_count, source):
-    available = [r for r in results if r.get("success")]
+    success_all = [r for r in results if r.get("success")]
+    dropped_non_res = 0
+    if ONLY_RESIDENTIAL:
+        dropped_non_res = sum(1 for r in success_all if r.get("residential") != "residential")
+        available = [r for r in success_all if r.get("residential") == "residential"]
+        if success_all and not available:
+            die(f"本轮 {len(success_all)} 个可用节点全是非住宅, 已全部过滤 (不再下发机房/未知) —— 不生成空结果")
+    else:
+        available = success_all
     countries = {}
     for n in available:
         c = n["country"] or "未知"
@@ -393,7 +404,10 @@ def build_outputs(results, raw_count, sstp_count, source):
         "sstp_nodes": sstp_count,
         "checked": len(results),
         "success": len(available),
-        "failed": len(results) - len(available),
+        "success_all": len(success_all),
+        "dropped_non_residential": dropped_non_res,
+        "only_residential": ONLY_RESIDENTIAL,
+        "failed": len(results) - len(success_all),
         "countries": len(countries),
         "residential_est": sum(1 for n in available if n["residential"] == "residential"),
         "datacenter_est": sum(1 for n in available if n["residential"] == "datacenter"),
@@ -422,16 +436,17 @@ CHAIN_URL = _env("CHAIN_URL", "https://whua898.github.io/wh-gate/chains.txt")
 
 
 def build_chains_text(data):
-    """生成 edgetunnel 链式代理清单: 按国家分组, 每国编号固定, 住宅优先, 延迟升序。
+    """生成 edgetunnel 链式代理清单: 按国家分组, 每国独立编号, 仅收录住宅节点 (机房/未知已过滤)。
     每行 = 「名字 + $sstp://vpn:vpn@host:port」, 名字不变, 指令每 30 分钟自动换。"""
     countries = data["countries"]
     lines = [
-        "# VPN Gate SSTP 节点 -> edgetunnel 链式代理清单",
+        "# VPN Gate SSTP 节点 -> edgetunnel 链式代理清单 (仅住宅)",
         f"# 自动更新: {data['generated_at']} (每 30 分钟重新检测)",
         f"# 固定地址: {CHAIN_URL}",
         "#",
         "# 用法: 在 edgetunnel 节点备注里直接粘贴下面任意一行 (名字与指令连写, 逗号分隔多行)",
         "#   例: 日本-住宅-01$sstp://vpn:vpn@vpnxxx.opengw.net:443",
+        "# 非住宅需求请用 ed 其他节点补; 本清单只收录住宅",
         "# 名字保持不变, 只有 $sstp:// 后面的地址每 30 分钟自动更换",
         "# 账号密码固定 vpn:vpn ; 端口必须保留",
         "# ========================================================",
@@ -446,7 +461,6 @@ def build_chains_text(data):
         nodes = sorted(
             grp["nodes"],
             key=lambda n: (
-                0 if n.get("residential") == "residential" else 1,
                 n.get("latency_ms") is None,
                 n.get("latency_ms") or 0,
                 n.get("host") or "",
@@ -454,14 +468,10 @@ def build_chains_text(data):
         )
         lines.append("")
         lines.append(
-            f"# ---- {zh} {code} · {grp['count']} 节点 (住宅 {grp['residential']} / 机房 {grp['datacenter']}) ----"
+            f"# ---- {zh} {code} · {grp['count']} 住宅节点 ----"
         )
-        res_nodes = [n for n in nodes if n.get("residential") == "residential"]
-        dc_nodes = [n for n in nodes if n.get("residential") != "residential"]
-        for i, n in enumerate(res_nodes, 1):
+        for i, n in enumerate(nodes, 1):
             lines.append(f"{zh}-住宅-{i:02d}$sstp://vpn:vpn@{n['host']}:{n['port']}")
-        for i, n in enumerate(dc_nodes, 1):
-            lines.append(f"{zh}-机房-{i:02d}$sstp://vpn:vpn@{n['host']}:{n['port']}")
     return "\n".join(lines) + "\n"
 
 
@@ -488,12 +498,12 @@ def build_hosts_text(data):
     _entry = os.environ.get("HOSTS_ENTRY", "").strip()
     edge = [e.strip() for e in _entry.split(",") if e.strip()] or EDGE_HOSTS or [f"{EDT_DOMAIN}:443"]
     lines = [
-        "# edgetunnel「自定义优选IP」清单 (整段复制, 追加到后台现有内容后面)",
+        "# edgetunnel「自定义优选IP」清单 (仅住宅, 整段复制, 追加到后台现有内容后面)",
         f"# 自动更新: {data['generated_at']} (每 30 分钟重新检测)",
         f"# 固定地址: {HOSTS_URL}",
         "# 每行 = 入口地址#名字$sstp://vpn:vpn@节点:端口",
         "# 入口用 7 个实测可用优选域名循环分配",
-        "# 名字 = 国家-住宅/机房-编号, 直接区分住宅与机房",
+        "# 名字 = 国家-住宅-编号 (仅住宅; 非住宅需求请用 ed 其他节点补)",
         "# 名字固定; 只有 $sstp:// 后面的节点地址每 30 分钟自动更换",
         "# 账号密码固定 vpn:vpn ; 节点端口必须保留",
         "# ========================================================",
@@ -509,7 +519,6 @@ def build_hosts_text(data):
         nodes = sorted(
             grp["nodes"],
             key=lambda n: (
-                0 if n.get("residential") == "residential" else 1,
                 n.get("latency_ms") is None,
                 n.get("latency_ms") or 0,
                 n.get("host") or "",
@@ -517,18 +526,12 @@ def build_hosts_text(data):
         )
         lines.append("")
         lines.append(
-            f"# ---- {zh} {code} · {grp['count']} 节点 (住宅 {grp['residential']} / 机房 {grp['datacenter']}) ----"
+            f"# ---- {zh} {code} · {grp['count']} 住宅节点 ----"
         )
-        res_nodes = [n for n in nodes if n.get("residential") == "residential"]
-        dc_nodes = [n for n in nodes if n.get("residential") != "residential"]
-        for i, n in enumerate(res_nodes, 1):
+        for i, n in enumerate(nodes, 1):
             entry = edge[idx % len(edge)]
             idx += 1
             lines.append(f"{entry}#{zh}-住宅-{i:02d}$sstp://vpn:vpn@{n['host']}:{n['port']}")
-        for i, n in enumerate(dc_nodes, 1):
-            entry = edge[idx % len(edge)]
-            idx += 1
-            lines.append(f"{entry}#{zh}-机房-{i:02d}$sstp://vpn:vpn@{n['host']}:{n['port']}")
     return "\n".join(lines) + "\n"
 
 
@@ -598,14 +601,13 @@ def build_sub_text(data):
         nodes = sorted(
             grp["nodes"],
             key=lambda n: (
-                0 if n.get("residential") == "residential" else 1,
                 n.get("latency_ms") is None,
                 n.get("latency_ms") or 0,
                 n.get("host") or "",
             ),
         )
         for i, n in enumerate(nodes, 1):
-            name = f"{zh}-{i:02d}"
+            name = f"{zh}-住宅-{i:02d}"
             chain = {"type": "sstp", **_socks5_account(f"vpn:vpn@{n['host']}:{n['port']}", 443)}
             chain_json = json.dumps(chain, separators=(",", ":"))
             enc = _b64_secret_encode(chain_json, EDT_UUID)
@@ -709,7 +711,7 @@ def main():
 
     # 4) 结果 + 网页
     data = build_outputs(results, raw_count, sstp_count, source)
-    log("RESULT", f"可用节点: {len(success)}")
+    log("RESULT", f"可用节点: {len(success)} (其中住宅 {data['stats']['success']}, 已过滤非住宅 {data['stats']['dropped_non_residential']})")
     log("RESULT", f"国家数量: {data['stats']['countries']}")
 
     data_path, html_path, chains_path, hosts_path, sub_path = write_outputs(data)

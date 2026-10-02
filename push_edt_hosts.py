@@ -8,8 +8,9 @@
   2. POST /login             用 ADMIN 密码换取 auth cookie
                              (cookie 值 = MD5MD5(UA+KEY+密码), 与 User-Agent 绑定 -> 全程固定 UA)
   3. GET  /admin/ADD.txt     读后台现有「自定义优选IP」内容
-  4. 合并: 剔除上一次自动同步的托管块(哨兵注释) + 清掉手工粘贴的旧块和同名旧条目,
-     再把新清单追加到末尾 (等价于 README 第 4 步「光标移到现有内容末尾粘贴」)
+  4. 合并: 剔除上一次自动同步的托管块(哨兵注释) + 清掉手工粘贴的旧块、同名旧条目
+     和早期「机房」遗留条目, 再把新清单追加到末尾
+     (等价于 README 第 4 步「光标移到现有内容末尾粘贴」)
   5. POST /admin/ADD.txt     原文 body 保存, 校验返回 message == 自定义IP已保存
   6. GET  /admin/ADD.txt     回读校验 (确认哨兵块确实落库)
 
@@ -247,6 +248,26 @@ def _strip_same_name_entries(lines, keep_names):
     return out
 
 
+# 生成器自产的节点名特征: 国家-住宅-N / 国家-机房-N
+_OWNED_NAME_RE = re.compile(r"-(?:住宅|机房)-\d+$")
+
+
+def _is_owned_entry(line):
+    """判断一行是否是生成器自产的条目 (含 #名字$sstp:// 或裸 名字$sstp://)。"""
+    m = re.search(r"#([^\s#]+)\$sstp://", line) or re.match(r"^\s*([^\s#]+)\$sstp://", line)
+    return bool(m and _OWNED_NAME_RE.search(m.group(1)))
+
+
+def _strip_owned_entries(lines):
+    """删除所有生成器自产的条目 (国家-住宅-N / 国家-机房-N)。
+
+    切换到「仅住宅」后, 早期版本下发的「机房」条目会残留在后台, 这里一并清掉,
+    保证每个节点名只有最新一条、且不再出现机房节点 (名字固定语义)。
+    用户自己填的其它内容不受影响。
+    """
+    return [ln for ln in lines if not _is_owned_entry(ln)]
+
+
 
 def merge(existing, new_text):
     """把新 hosts 清单合并进后台现有内容, 返回合并后的完整文本。"""
@@ -256,6 +277,7 @@ def merge(existing, new_text):
     lines = existing.replace("\r\n", "\n").split("\n")
     lines = _strip_sentinel_blocks(lines)
     lines = _strip_legacy_tail(lines)
+    lines = _strip_owned_entries(lines)
     lines = _strip_same_name_entries(lines, keep_names)
 
     # 去掉尾部空行, 追加哨兵托管块 (等价于「光标移到末尾 Ctrl+V」)
