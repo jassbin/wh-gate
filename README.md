@@ -124,7 +124,7 @@ https://你的GitHub用户名.github.io/仓库名/hosts.txt
 拉节点 → 检测 → 生成 `hosts.txt` → 发布到 Pages → 同步进 edgetunnel 后台「自定义优选IP」→ 回写 `.github/last-run.txt`（防 GitHub 因"公开仓库 60 天无活动"停用定时任务）。
 你唯一要做的：在客户端里更新/刷新订阅（订阅地址是 edgetunnel 后台给你的那个），然后测延迟选节点用。
 
-> ⚠️ 本仓库是 fork 出来的，GitHub **默认停用 fork 仓库的定时任务**：第一次用请先到 Actions → `VPN Gate Node Check` → **Enable workflow**，否则只会手动跑、定时永不触发（详见「五、常见问题 → 定时任务不触发」）。fork 里的定时任务还可能被 GitHub 再次自动停用，想一劳永逸见「七、脱离 fork」。
+> ⚠️ **你 fork 出来的仓库**，GitHub **默认停用定时任务**：第一次用请先到 Actions → `VPN Gate Node Check` → **Enable workflow**，否则只会手动跑、定时永不触发（详见「五、常见问题 → 定时任务不触发」）。fork 里的定时任务还可能被 GitHub 再次自动停用，想一劳永逸见「七、脱离 fork」。
 
 ### 手工同步（备用：自动同步没配好时才用，约 1 分钟）
 
@@ -225,7 +225,7 @@ EDGE_HOSTS = [
 ### 定时任务不触发
 到 Actions → `VPN Gate Node Check` 页面点 **Enable workflow**（两种原因的表现都是「手动能跑、定时不跑」）：
 
-1. **fork 仓库（本仓库就是从 `hezhanleiok/gate` fork 来的）**：GitHub 对「公开仓库被 fork」出来的仓库**默认停用 schedule**——`workflow_dispatch` 能跑、`schedule` 一次都不跑，而且没有任何报错、邮件或通知，`.github/last-run.txt` 也永远不会有 commit。页面顶部一般有黄色横幅（`Workflows aren't being run on this forked repository`），点 **Enable workflow** 即可；若没看到横幅，先 **Disable workflow** 再 **Enable workflow** 强制重新注册定时。
+1. **你 fork 出来的仓库**：GitHub 对「公开仓库被 fork」出来的仓库**默认停用 schedule**——`workflow_dispatch` 能跑、`schedule` 一次都不跑，而且没有任何报错、邮件或通知，`.github/last-run.txt` 也永远不会有 commit。页面顶部一般有黄色横幅（`Workflows aren't being run on this forked repository`），点 **Enable workflow** 即可；若没看到横幅，先 **Disable workflow** 再 **Enable workflow** 强制重新注册定时。
 2. **公开仓库 60 天无 commit**：GitHub 会自动停用 schedule。正常情况下每次运行都会回写 `.github/last-run.txt` 产生 commit，不会触发；若停了，同样点 **Enable workflow**。
 
 > fork 里的定时任务可能被 GitHub 再次自动停用；而且 GitHub 的 cron 是「尽力而为」的（官方文档：高负载时可能延迟、甚至丢弃运行），所以别指望它严格每 30 分钟准点。
