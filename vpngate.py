@@ -734,6 +734,19 @@ def main():
 
     # 硬性失败: Worker 完全不可达 (没有任何一个请求拿到正常响应)
     if uniq and not success and len(worker_errors) == len(uniq):
+        # 429 = Cloudflare Error 1027: 免费版 10 万请求/UTC 日 额度用尽。
+        # 该额度是【账号级共享】的 —— 同账号所有 Worker 一起被顶掉,
+        # 00:00 UTC 重置后自动恢复 (所以表现为每天固定时段突然全挂)。
+        if all(r.get("error") == "HTTP 429" for r in worker_errors):
+            die(
+                "检测 Worker 全部返回 429 = Cloudflare Error 1027: "
+                "Workers 免费版当天请求数已达 100,000 (账号级共享, 同账号其它 Worker 也会一起挂), "
+                "00:00 UTC 会自动重置。"
+                "排查: Cloudflare Dashboard → Workers & Pages → Metrics 看当天请求量, "
+                "找出消耗大户 (爬虫/宽路由/Pages Functions/subrequest 扇出); "
+                "根治: 升级 Workers Paid, 或把检测 Worker 拆到另一个 CF 账号。"
+                " 本次运行判定失败 (不生成空结果)"
+            )
         die("Worker 全部请求异常, 检测服务不可用 — 本次运行判定失败 (不生成空结果)")
 
     # 4) 结果 + 网页
