@@ -1,0 +1,156 @@
+name: VPN Gate Node Check
+
+on:
+  # ⚠️ 这里刻意【不用】GitHub 自带的 schedule: 它的定时是「尽力而为」的——
+  #    高负载时会被延迟，甚至整个丢弃。本仓库实测: cron "*/5 * * * *" 在仓库存在
+  #    数小时内 event=schedule 计数恒为 0 (同账号里 cron 稀疏的仓库只是「迟到几小时」,
+  #    而 */5 的每个 5 分钟槽位在积压清空前就过期、被丢掉了)。
+  #    因此改用【外部定时器】按点调 workflow_dispatch 触发: 见 README「八、外部定时器」。
+  #    (外部定时器 = Cloudflare Worker 的 cron / cron-job.org 调
+  #     POST .../actions/workflows/check.yml/dispatches, body {"ref":"main"}。)
+  # 想改回 GitHub 自带定时: 取消下面 2 行注释即可——但必须与外部定时器【二选一】,
+  # 否则两边同时触发会重复运行 (外部定时器仍在时, 请勿放开)。
+  # schedule:
+  #   - cron: "*/30 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write # 回写 .github/last-run.txt 需要写权限 (防 60 天停用定时任务)
+  pages: write
+  id-token: write
+
+concurrency:
+  group: gate-check
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # ⚠️ deploy-pages 必需: 部署作业必须声明 github-pages 环境, 否则 API
+    #    返回 400 "Missing environment" (实测: run 36956204020, Deploy to
+    #    GitHub Pages 步骤)。url 引用部署输出, 跑完后 Environments 页显示站点链接。
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # 回写 commit 需要完整历史 (pull --rebase 用)
+
+      - name: Preflight - 检查 Pages 是否已启用 (无法自动开启, 只给提示)
+        # ⚠️ 为什么不能自动启用: 建站属「仓库管理」操作, GitHub 出于安全明确禁止
+        #    Actions 默认 GITHUB_TOKEN 执行 (无论 permissions: 怎么写都不行;
+        #    configure-pages 的 enablement 也必须有 PAT / GitHub App Token)。
+        #    所以 Pages 必须手动开一次:
+        #    Settings → Pages → Build and deployment → Source = GitHub Actions。
+        #    本步骤提前检查并给出中文指引, 免得白等 2~10 分钟才在 Configure Pages 处
+        #    抛一句难懂的英文 Not Found。
+        # ⚠️ 该端点必须带 token 查询: 匿名请求对任何仓库都返回 404 (实测连已启用
+        #    Pages 的公开仓库也是 404), 不能用匿名结果判断是否已启用。
+        #    带 token 时: 已启用 = 200, 未启用 = 404 —— 与 Configure Pages 判定一致。
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          code=""
+          for i in 1 2 3; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/${{ github.repository }}/pages")
+            echo "尝试 $i: Pages API status = $code"
+            if [ "$code" = "200" ] || [ "$code" = "404" ]; then
+              break
+            fi
+            sleep 5
+          done
+          if [ "$code" = "200" ]; then
+            echo "GitHub Pages 已启用, 继续。"
+          elif [ "$code" = "404" ]; then
+            echo "::error title=GitHub Pages 尚未启用::请到仓库 Settings → Pages → Build and deployment → Source 选 'GitHub Actions' 后重新运行 (GitHub 禁止 Actions 自动启用 Pages, 只能手动开一次)"
+            exit 1
+          else
+            echo "::warning title=无法确认 Pages 状态::API 返回 $code, 跳过预检, 交由后续 Configure Pages 判定。"
+          fi
+
+      - name: Setup Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Get VPN Gate nodes + check via Cloudflare Worker + build page
+        run: python vpngate.py
+        env:
+          # 已部署的检测 Worker: 密钥路径来自仓库 Secret CHECK_TOKEN (与 Worker 的 AUTH_PATH 变量同值)
+          # 未配置 Secret 时回退裸路径 (仅当 Worker 未设置 AUTH_PATH 时可用)
+          CHECK_WORKER: ${{ secrets.CHECK_TOKEN && format('https://chks5.8dy.xx.kg/{0}/check?sstp=vpn:vpn@', secrets.CHECK_TOKEN) || 'https://chks5.8dy.xx.kg/check?sstp=vpn:vpn@' }}
+          CHECK_CONCURRENCY: "32"
+          CHECK_TIMEOUT: "90"
+          # 生成的 hosts.txt/chains.txt/sub.txt 头部注释写「每 X 分钟重新检测」:
+          # 必须与实际触发间隔一致——现在由外部定时器决定, 改频率时同步改这里,
+          # 否则注释与实际频率对不上。
+          # (Actions 不会把 cron 表达式注入 job, 只能用这个自描述变量显式声明。)
+          REFRESH_MINUTES: "30"
+          # sub.txt 订阅含 UUID: 默认不发布 (PUBLISH_SUB 未设置即跳过); 需要时配 Secret EDT_UUID 并加 PUBLISH_SUB=1
+          EDT_UUID: ${{ secrets.EDT_UUID }}
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v6
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: 'public'
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5
+
+      - name: Show site URL
+        # 用 Pages 部署步骤的官方输出, 不写死地址 (仓库改名/换账号后自动正确)
+        run: 'echo "site: ${{ steps.deployment.outputs.page_url }} (deploy outcome: ${{ steps.deployment.outcome }})"'
+
+      - name: Push hosts.txt to edgetunnel admin (自定义优选IP, 自动化)
+        env:
+          EDT_BASE: ${{ secrets.EDT_BASE }}
+          EDT_ADMIN_PASSWORD: ${{ secrets.EDT_ADMIN_PASSWORD }}
+          # 优先用本次刚生成的本地文件 (不依赖 Pages CDN 生效延迟), 再回退在线地址/上游
+          HOSTS_FILE: public/hosts.txt
+          HOSTS_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/hosts.txt
+        run: |
+          if [ -z "$EDT_ADMIN_PASSWORD" ]; then
+            echo "跳过: 未配置仓库 Secret EDT_ADMIN_PASSWORD。"
+            echo "配置 Secrets -> EDT_ADMIN_PASSWORD (edgetunnel 的 ADMIN 密码) 后即可全自动同步后台。"
+            exit 0
+          fi
+          python push_edt_hosts.py
+
+      - name: Commit run state (keep scheduled workflow alive)
+        # 只有当 workflow 由 GitHub 自带 schedule 触发时才回写, 让仓库保持"活动",
+        # 防止 GitHub 因"公开仓库 60 天无活动"自动停用定时任务。
+        # ⚠️ 现在改用外部定时器 (workflow_dispatch) 触发, 本步不会执行——
+        #    因为没有 GitHub 自带 schedule 可被停用, 也就不再需要它。
+        #    刻意保留 if 条件 (不用 always()): 将来若恢复 schedule, 它自动恢复作用。
+        # 这只是一次触发器 commit，不影响 push 并发（失败时不阻塞）。
+        if: github.event_name == 'schedule'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          mkdir -p .github
+          TS=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+          echo "$TS" > .github/last-run.txt
+          git add .github/last-run.txt
+          if git diff --cached --quiet; then
+            echo "nothing to commit"
+            exit 0
+          fi
+          git commit -m "chore: scheduled run at $TS [skip ci]"
+          for i in 1 2 3 4 5; do
+            git pull --rebase origin main && git push origin HEAD:main && break
+            echo "push 冲突, 重试 $i/5 ..."
+            sleep 10
+          done
