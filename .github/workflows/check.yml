@@ -24,12 +24,47 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0 # 回写 commit 需要完整历史 (pull --rebase 用)
 
+      - name: Preflight - 检查 Pages 是否已启用 (无法自动开启, 只给提示)
+        # ⚠️ 为什么不能自动启用: 建站属「仓库管理」操作, GitHub 出于安全明确禁止
+        #    Actions 默认 GITHUB_TOKEN 执行 (无论 permissions: 怎么写都不行;
+        #    configure-pages 的 enablement 也必须有 PAT / GitHub App Token)。
+        #    所以 Pages 必须手动开一次:
+        #    Settings → Pages → Build and deployment → Source = GitHub Actions。
+        #    本步骤提前检查并给出中文指引, 免得白等 2~10 分钟才在 Configure Pages 处
+        #    抛一句难懂的英文 Not Found。
+        # ⚠️ 该端点必须带 token 查询: 匿名请求对任何仓库都返回 404 (实测连已启用
+        #    Pages 的公开仓库也是 404), 不能用匿名结果判断是否已启用。
+        #    带 token 时: 已启用 = 200, 未启用 = 404 —— 与 Configure Pages 判定一致。
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          code=""
+          for i in 1 2 3; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/${{ github.repository }}/pages")
+            echo "尝试 $i: Pages API status = $code"
+            if [ "$code" = "200" ] || [ "$code" = "404" ]; then
+              break
+            fi
+            sleep 5
+          done
+          if [ "$code" = "200" ]; then
+            echo "GitHub Pages 已启用, 继续。"
+          elif [ "$code" = "404" ]; then
+            echo "::error title=GitHub Pages 尚未启用::请到仓库 Settings → Pages → Build and deployment → Source 选 'GitHub Actions' 后重新运行 (GitHub 禁止 Actions 自动启用 Pages, 只能手动开一次)"
+            exit 1
+          else
+            echo "::warning title=无法确认 Pages 状态::API 返回 $code, 跳过预检, 交由后续 Configure Pages 判定。"
+          fi
+
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.11"
 
@@ -47,36 +82,17 @@ jobs:
           # sub.txt 订阅含 UUID: 默认不发布 (PUBLISH_SUB 未设置即跳过); 需要时配 Secret EDT_UUID 并加 PUBLISH_SUB=1
           EDT_UUID: ${{ secrets.EDT_UUID }}
 
-      - name: Ensure GitHub Pages is enabled (one-time auto setup)
-        run: |
-          code=$(curl -s -o /dev/null -w '%{http_code}' \
-            -H "Authorization: Bearer $GITHUB_TOKEN" \
-            "https://api.github.com/repos/$GITHUB_REPOSITORY/pages")
-          echo "Pages API status: $code"
-          if [ "$code" = "404" ]; then
-            echo "首次运行: 启用 GitHub Pages (source = GitHub Actions, 目录 /public)"
-            curl -sS -X PUT \
-              -H "Authorization: Bearer $GITHUB_TOKEN" \
-              -H "Content-Type: application/json" \
-              -d '{"build_type":"workflow","source":{"branches":["main"],"path":"/public"}}' \
-              "https://api.github.com/repos/$GITHUB_REPOSITORY/pages"
-            echo
-            sleep 10
-          fi
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Configure Pages
-        uses: actions/configure-pages@v5
+        uses: actions/configure-pages@v6
 
       - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v5
         with:
           path: 'public'
 
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
 
       - name: Show site URL
         # 用 Pages 部署步骤的官方输出, 不写死地址 (仓库改名/换账号后自动正确)

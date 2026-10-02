@@ -73,19 +73,19 @@ VPN Gate 官方源
 
 > 注意：**fork 出来的仓库，GitHub 默认停用定时任务**（手动能跑、定时一次都不跑，且没有任何提示）。fork 后务必到 Actions 页点一次 **Enable workflow**；想彻底避开 fork 这套限制，按「七、脱离 fork」新建独立仓库。
 
-### 第 3 步：修改配置（重点，Fork 后要改的全在这）
+### 第 3 步：修改配置（重点，要改的配置全在这）
 
-进你 fork 的仓库，改下面几处：
+进你的仓库（fork 或按「七、脱离 fork」自建的非 fork 仓库都行），改下面几处：
 
 | 文件 | 位置 | 改成什么 | 为什么 |
 | :--- | :--- | :--- | :--- |
 | .github/workflows/check.yml | `CHECK_WORKER`（含密钥路径，形如 `https://你的Worker域名/<密钥>/check?sstp=vpn:vpn@`） | 你的检测 Worker 域名 | 检测统一走你自己的 Worker，需与 Worker 的 `AUTH_PATH` 变量同值 |
-| vpngate.py | `EDT_DOMAIN`（约 550 行） | 你的 edgetunnel 域名 | 链式代理入口的 SNI/host；也可用仓库 Secret `EDT_BASE` 覆盖后台地址 |
+| vpngate.py | `EDT_DOMAIN`（约 562 行） | 你的 edgetunnel 域名 | 链式代理入口的 SNI/host；也可用仓库 Secret `EDT_BASE` 覆盖后台地址 |
 | 仓库 Secret `EDT_UUID`（环境变量） | — | 你的 edgetunnel UUID | **源码不保存真值**；仅在需要生成公开 sub.txt 时注入 |
-| vpngate.py | `EDGE_HOSTS`（约 480 行）或环境变量 `EDGE_HOSTS` | 你测出来的优选域名（逗号分隔，不用改源码也行） | 入口用谁，决定稳不稳 |
-| vpngate.py | `CHAIN_URL` / `HOSTS_URL` / `SUB_URL`（约 430/490/552 行） | 把里面写死的固定地址换成 你的用户名/仓库名 | 清单注释头里的固定地址；也可用同名环境变量覆盖（sub.txt 默认不发布，见「六、安全与隐私」） |
+| vpngate.py | `EDGE_HOSTS`（约 500 行）或环境变量 `EDGE_HOSTS` | 你测出来的优选域名（逗号分隔，不用改源码也行） | 入口用谁，决定稳不稳 |
+| vpngate.py | `CHAIN_URL` / `HOSTS_URL` / `SUB_URL`（约 455/510/564 行） | **不用改**：地址由 Actions 注入的 `GITHUB_REPOSITORY` 自动推导（仅非 CI 本地运行才回退到写死值） | 清单注释头里的固定地址；也可用同名环境变量覆盖（sub.txt 默认不发布，见「六、安全与隐私」） |
 | 仓库 Secret `CHECK_TOKEN` | — | 检测 Worker 的密钥路径，与 Worker 的 `AUTH_PATH` 变量同值 | 防止公开的检测地址被第三方白嫖 |
-| .github/workflows/check.yml | 最后的 Show site URL | 把里面写死的站点地址换成你的 | 运行日志里显示的站点地址 |
+| .github/workflows/check.yml | 最后的 Show site URL | **不用改**：用 Pages 官方输出 `steps.deployment.outputs.page_url` 自动显示 | 运行日志里显示的站点地址 |
 | 仓库 Secret `EDT_ADMIN_PASSWORD` | — | edgetunnel 后台的 ADMIN 密码 | 必填，否则「同步进后台」那一步自动跳过 |
 | 仓库 Secret `EDT_BASE`（可选） | — | 你的 edgetunnel 地址 | 覆盖默认后台地址 |
 
@@ -93,10 +93,12 @@ VPN Gate 官方源
 
 ### 第 4 步：开启 GitHub Pages 与 Actions
 
-1. 进你 fork 的仓库 → Settings → Pages，Source 设为 **GitHub Actions**（首次运行 workflow 也会尝试自动开启）
+1. 进你的仓库 → Settings → Pages → Build and deployment → **Source 选 `GitHub Actions`**（**必须手动点这一下**：GitHub 出于安全禁止 Actions 用默认 token 自动启用 Pages；没开会卡在 `Configure Pages` 步骤报 `Not Found`）
 2. 进 Actions 页，若提示启用 Actions 就点启用
 3. 手动触发一次：Actions → VPN Gate Node Check → Run workflow → Run workflow
 4. 等它跑完（约 2~10 分钟，取决于节点数量），看到绿色 ✓ 即成功
+
+> 维护提示：workflow 用的是当前最新主版本 —— `actions/checkout@v7`、`actions/setup-python@v7`、`actions/configure-pages@v6`、`actions/upload-pages-artifact@v5`、`actions/deploy-pages@v5`（旧版本基于 Node 20，会被 GitHub 提示弃用警告）。
 
 ### 第 5 步：确认产物
 
@@ -163,7 +165,7 @@ https://你的GitHub用户名.github.io/仓库名/hosts.txt
 
 ### 在哪个文件改
 - 文件：vpngate.py
-- 位置：`EDGE_HOSTS = [ ... ]`（约 480 行）
+- 位置：`EDGE_HOSTS = [ ... ]`（约 500 行）
 - 不改源码也行：设环境变量 `EDGE_HOSTS`（逗号分隔，格式 `域名:443`），会整体覆盖默认值
 
 ### 改法
@@ -195,12 +197,13 @@ EDGE_HOSTS = [
 
 | 常量 | 约位置 | 说明 |
 | :--- | :--- | :--- |
-| EDGE_HOSTS | 约 480 行 / 环境变量 `EDGE_HOSTS` | 入口优选域名（改源码或设环境变量都行） |
-| EDT_DOMAIN | 约 550 行 / 环境变量 `EDT_DOMAIN`（后台地址另有 Secret `EDT_BASE`） | 你的 edgetunnel 域名 |
-| EDT_UUID | 环境变量 / Secret | edgetunnel UUID；**源码不保存真值**，未设置时不生成 sub.txt |
-| EDT_FINGERPRINT | 约 551 行 / 环境变量 `EDT_FINGERPRINT` | TLS 指纹（默认 chrome） |
-| WORKER_CHECK_URL | 约 75 行 / 环境变量 `CHECK_WORKER`（含 `/<密钥>` 前缀） | 检测 Worker（本地运行默认值，Action 里用 workflow 的 CHECK_WORKER 覆盖） |
-| COUNTRY_ZH | 约 100 行 | 国家中文名映射 |
+| `PAGES_BASE` | 约 75 行（由 `_pages_base()` 推导） | 本仓库 Pages 根地址；`CHAIN_URL`/`HOSTS_URL`/`SUB_URL` 都基于它，仓库改名/迁移会自动跟随 |
+| `EDGE_HOSTS` | 约 500 行 / 环境变量 `EDGE_HOSTS` | 入口优选域名（改源码或设环境变量都行） |
+| `EDT_DOMAIN` | 约 562 行 / 环境变量 `EDT_DOMAIN`（后台地址另有 Secret `EDT_BASE`） | 你的 edgetunnel 域名 |
+| `EDT_UUID` | 环境变量 / Secret | edgetunnel UUID；**源码不保存真值**，未设置时不生成 sub.txt |
+| `EDT_FINGERPRINT` | 约 563 行 / 环境变量 `EDT_FINGERPRINT` | TLS 指纹（默认 chrome） |
+| `WORKER_CHECK_URL` | 约 85 行 / 环境变量 `CHECK_WORKER`（含 `/<密钥>` 前缀） | 检测 Worker（本地运行默认值，Action 里用 workflow 的 CHECK_WORKER 覆盖） |
+| `COUNTRY_ZH` | 约 112 行 | 国家中文名映射 |
 
 ---
 
@@ -221,6 +224,13 @@ EDGE_HOSTS = [
 
 ### 后台没同步上
 先看 Actions 日志里「Push hosts.txt to edgetunnel admin」那一步：若显示「跳过：未配置 EDT_ADMIN_PASSWORD」就是 Secret 没配；若登录失败，检查密码是否为 Worker 上的 `ADMIN` 变量值、后台地址（`EDT_BASE` / `EDT_DOMAIN`）是否写对。
+
+### 运行失败：`Configure Pages` 报 `Not Found` / `Get Pages site failed`
+说明仓库的 Pages **站点还没创建**。这一步**无法在 workflow 里自动完成**：建站属于「仓库管理」操作，GitHub 出于安全禁止 Actions 用默认的 `GITHUB_TOKEN` 建站（无论 `permissions:` 怎么写都不行；`configure-pages` 的 `enablement: true` 也必须换成 PAT 或 GitHub App Token 才能用）。
+
+修复：进仓库 **Settings → Pages → Build and deployment → Source** 选 **`GitHub Actions`**（打开该页面即自动创建站点），然后重新运行 workflow。
+
+> workflow 开头的 `Preflight` 步骤会**提前**检查 Pages 是否已启用，未启用就直接报错并给出中文指引，所以正常不会再白等几分钟才在 `Configure Pages` 处失败。
 
 ### 定时任务不触发
 到 Actions → `VPN Gate Node Check` 页面点 **Enable workflow**（两种原因的表现都是「手动能跑、定时不跑」）：
@@ -291,7 +301,7 @@ GitHub **没有「unfork」按钮**：fork 关系一旦建立就无法在同一�
    | `EDT_UUID` | edgetunnel 的 UUID（仅发布 sub.txt 时需要） | 可选 |
 
 4. **先手动跑一次**（推送本身不会触发运行，因为 `on:` 只有 `schedule` + `workflow_dispatch`）：Actions → `VPN Gate Node Check` → **Run workflow**。
-   这一次会顺带把 Pages 自动启用（首次运行走 workflow 里的 `Ensure GitHub Pages is enabled` 步骤）、生成 `hosts.txt`/`chains.txt`/`data.json` 并发布，是确认 Secrets 配对了没有的最快方式。
+   运行前请先确认 Pages 已启用（`Settings → Pages → Source = GitHub Actions`）——workflow 开头的 `Preflight` 步骤会检查，未启用会直接报错提示（GitHub 禁止 Actions 自动启用 Pages，只能手动开一次）。跑完会生成 `hosts.txt`/`chains.txt`/`data.json` 并发布，是确认 Secrets 配对了没有的最快方式。
 
 5. **确认定时已生效**：新仓库不是 fork，schedule 不会被停用（Actions 页 workflow 状态应为 `active`，也没有黄色横幅）。之后 Actions 列表里 `Event` 列出现 `schedule`（一般 30 分钟内）即迁移成功。
 
