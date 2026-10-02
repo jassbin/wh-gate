@@ -22,6 +22,12 @@ jobs:
   check:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # ⚠️ deploy-pages 必需: 部署作业必须声明 github-pages 环境, 否则 API
+    #    返回 400 "Missing environment" (实测: run 36956204020, Deploy to
+    #    GitHub Pages 步骤)。url 引用部署输出, 跑完后 Environments 页显示站点链接。
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
