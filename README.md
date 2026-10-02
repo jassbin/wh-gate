@@ -262,13 +262,21 @@ GitHub **没有「unfork」按钮**：fork 关系一旦建立就无法在同一�
    > 必须是「空白新建」的仓库，它和上游 `hezhanleiok/gate` 没有任何 fork 关系，schedule 才不会被停用。
    > 想保留原来的 `https://你的用户名.github.io/wh-gate/` 地址：先**删除**旧 fork，再新建**同名**仓库（GitHub 允许复用已删除仓库的名字），这样订阅网址一个字都不用改。
 
-2. **改 remote 并推送**（在本地仓库里执行）：
+2. **推送到新仓库**（在本地仓库里执行）：
 
-   ```bash
-   git remote rename origin fork              # 旧 fork 留档 (没有 origin 这句就跳过)
-   git remote add origin https://github.com/你的用户名/新仓库名.git
-   git push -u origin main                    # 连历史一起推上去
-   ```
+   - 新仓库用了**同名** `wh-gate`（推荐，订阅网址一个字都不用改）：remote 不用动，直接推：
+
+     ```bash
+     git push -u origin main
+     ```
+
+   - 新仓库用了**别的名字**：先换掉 remote 再推：
+
+     ```bash
+     git remote rename origin fork              # 旧 fork 留档 (没有 origin 这句就跳过)
+     git remote add origin https://github.com/你的用户名/新仓库名.git
+     git push -u origin main
+     ```
 
    推送凭据：HTTPS 用 PAT（需 repo 权限）；也可换成 SSH 地址 `git@github.com:你的用户名/新仓库名.git`。
    用 GitHub CLI 可以一条命令搞定：`gh repo create 新仓库名 --public --source . --push`。
@@ -282,9 +290,12 @@ GitHub **没有「unfork」按钮**：fork 关系一旦建立就无法在同一�
    | `EDT_BASE` | edgetunnel 后台地址（缺省取 `EDT_DOMAIN`） | 可选 |
    | `EDT_UUID` | edgetunnel 的 UUID（仅发布 sub.txt 时需要） | 可选 |
 
-4. **等第一次自动运行**：新仓库不是 fork，schedule 不会被停用。到 Actions 页看到 `VPN Gate Node Check`，且 `Event` 列出现 `schedule`（一般 30 分钟内）即迁移成功。公开仓库 Actions 默认开启，无需再点 Enable workflow。
+4. **先手动跑一次**（推送本身不会触发运行，因为 `on:` 只有 `schedule` + `workflow_dispatch`）：Actions → `VPN Gate Node Check` → **Run workflow**。
+   这一次会顺带把 Pages 自动启用（首次运行走 workflow 里的 `Ensure GitHub Pages is enabled` 步骤）、生成 `hosts.txt`/`chains.txt`/`data.json` 并发布，是确认 Secrets 配对了没有的最快方式。
 
-5. **停掉旧 fork（重要）**：旧仓库 Settings → 最底部 Danger Zone → **Archive this repository**（或删除）。否则两边会同时往 edgetunnel 后台写同一个托管块（哨兵注释 `# >>> wh-gate auto-sync >>>`），互相覆盖。
+5. **确认定时已生效**：新仓库不是 fork，schedule 不会被停用（Actions 页 workflow 状态应为 `active`，也没有黄色横幅）。之后 Actions 列表里 `Event` 列出现 `schedule`（一般 30 分钟内）即迁移成功。
+
+6. **确认旧 fork 已清理**：旧仓库 Settings → 最底部 Danger Zone → **Archive this repository**（或删除）。否则两边会同时往 edgetunnel 后台写同一个托管块（哨兵注释 `# >>> wh-gate auto-sync >>>`），互相覆盖。
 
 ### 迁移后要换的只有订阅网址
 Pages 地址变成 `https://你的用户名.github.io/新仓库名/`，之前手动记下的 `hosts.txt` 网址跟着换即可；edgetunnel 后台里的内容不用管——workflow 会用同样的哨兵注释整体替换旧块，不会重复堆叠。
