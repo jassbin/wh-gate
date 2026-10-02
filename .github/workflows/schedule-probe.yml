@@ -1,0 +1,32 @@
+# ⚠️ 临时诊断文件（排查完毕即可删除，删掉本文件即恢复原状）。
+#
+# 为什么需要它：本仓库 check.yml 的 schedule 长期 0 次运行
+#   （API: actions/runs?event=schedule → total_count = 0；workflow_dispatch 正常）。
+#   已确认：非 fork、workflow state=active、cron 字节正确、Disable→Enable + push 重注册均无效。
+#   这可能是「仓库级调度失效」也可能是「check.yml 这个 workflow 实体的定时注册损坏」。
+#
+# 判读方式：
+#   ① 若本文件（与 check.yml 同 cron、但是全新路径=全新 workflow 实体）能跑出 schedule 运行
+#      → 说明仓库调度正常，是 check.yml 的注册卡死了：把 check.yml 换文件名重建即可修复。
+#   ② 若本文件也不跑 → 仓库级调度问题，只能等 GitHub 修复或改用外部定时器（见 README）。
+#
+# 删除：Actions 页删掉本文件的运行记录后 `git rm .github/workflows/schedule-probe.yml` 推送即可。
+name: schedule-probe
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: report
+        run: |
+          echo "schedule-probe fired"
+          echo "event=${{ github.event_name }}"
+          echo "utc=$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
