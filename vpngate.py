@@ -55,6 +55,26 @@ def _env(name, default=""):
     return "".join(os.environ.get(name, default).split())
 
 
+def _pages_base():
+    """本仓库 GitHub Pages 根地址 (清单头部「固定地址」用, 见 CHAIN_URL/HOSTS_URL/SUB_URL)。
+
+    Actions 会自动注入 GITHUB_REPOSITORY=owner/repo, 据此推导:
+    仓库改名 / 换账号 / 从 fork 迁到独立仓库后, 地址自动跟着变, 不必改源码。
+    非 CI 环境 (本地运行) 没有该变量, 回退到写死地址。
+    """
+    slug = os.environ.get("GITHUB_REPOSITORY", "").strip()
+    if "/" in slug:
+        owner, repo = slug.split("/", 1)
+        # 用户主页仓库 (<owner>.github.io): Pages 地址不带仓库名
+        if repo.lower() == f"{owner.lower()}.github.io":
+            return f"https://{owner}.github.io"
+        return f"https://{owner}.github.io/{repo}"
+    return "https://whua898.github.io/wh-gate"
+
+
+PAGES_BASE = _pages_base()
+
+
 VPNGATE_API = _env("VPNGATE_API", "http://www.vpngate.net/api/iphone/")
 # 官方接口失败时的回退数据源: 预解析 JSON 镜像 (字段与官方 CSV 同源)
 VPNGATE_MIRROR = _env(
@@ -432,7 +452,7 @@ def build_outputs(results, raw_count, sstp_count, source):
     return data
 
 
-CHAIN_URL = _env("CHAIN_URL", "https://whua898.github.io/wh-gate/chains.txt")
+CHAIN_URL = _env("CHAIN_URL", f"{PAGES_BASE}/chains.txt")
 
 
 def build_chains_text(data):
@@ -487,7 +507,7 @@ EDGE_HOSTS = [
     if h.strip()
 ]
 
-HOSTS_URL = _env("HOSTS_URL", "https://whua898.github.io/wh-gate/hosts.txt")
+HOSTS_URL = _env("HOSTS_URL", f"{PAGES_BASE}/hosts.txt")
 
 
 def build_hosts_text(data):
@@ -541,7 +561,7 @@ def build_hosts_text(data):
 EDT_UUID = _env("EDT_UUID", "").lower()
 EDT_DOMAIN = _env("EDT_DOMAIN", "wh-edd.8dy.xx.kg")
 EDT_FINGERPRINT = _env("EDT_FINGERPRINT", "chrome")
-SUB_URL = _env("SUB_URL", "https://whua898.github.io/wh-gate/sub.txt")
+SUB_URL = _env("SUB_URL", f"{PAGES_BASE}/sub.txt")
 
 
 def _b64_secret_encode(plaintext, secret):

@@ -71,6 +71,8 @@ VPN Gate 官方源
 
 在 GitHub 上打开本仓库，点 **Fork**，复制到你账号下（变成 你的GitHub用户名/仓库名）。
 
+> 注意：**fork 出来的仓库，GitHub 默认停用定时任务**（手动能跑、定时一次都不跑，且没有任何提示）。fork 后务必到 Actions 页点一次 **Enable workflow**；想彻底避开 fork 这套限制，按「七、脱离 fork」新建独立仓库。
+
 ### 第 3 步：修改配置（重点，Fork 后要改的全在这）
 
 进你 fork 的仓库，改下面几处：
@@ -121,6 +123,8 @@ https://你的GitHub用户名.github.io/仓库名/hosts.txt
 配好 Secrets 后什么都不用做：本仓库 `VPN Gate Node Check` workflow 每 30 分钟运行一次 ——
 拉节点 → 检测 → 生成 `hosts.txt` → 发布到 Pages → 同步进 edgetunnel 后台「自定义优选IP」→ 回写 `.github/last-run.txt`（防 GitHub 因"公开仓库 60 天无活动"停用定时任务）。
 你唯一要做的：在客户端里更新/刷新订阅（订阅地址是 edgetunnel 后台给你的那个），然后测延迟选节点用。
+
+> ⚠️ 本仓库是 fork 出来的，GitHub **默认停用 fork 仓库的定时任务**：第一次用请先到 Actions → `VPN Gate Node Check` → **Enable workflow**，否则只会手动跑、定时永不触发（详见「五、常见问题 → 定时任务不触发」）。fork 里的定时任务还可能被 GitHub 再次自动停用，想一劳永逸见「七、脱离 fork」。
 
 ### 手工同步（备用：自动同步没配好时才用，约 1 分钟）
 
@@ -209,7 +213,8 @@ EDGE_HOSTS = [
 检查：edgetunnel 是否部署好、域名是否解析到 Cloudflare、UUID 是否填对、传输协议是否对得上（默认按 ws/TLS 生成）。
 
 ### 30 分钟没更新
-到 Actions 页看最近一次运行是否成功、cron 是否还在（.github/workflows/check.yml 里的 */30 * * * *）。
+到 Actions 页看最近一次运行是否成功、`Event` 里有没有 `schedule`（cron 见 .github/workflows/check.yml，当前 `*/30 * * * *`）。
+如果只有 `workflow_dispatch`、从来没有 `schedule` 运行 → 见下条「定时任务不触发」。
 
 ### 检测 Worker 报错
 确认 Worker 部署成功、域名填对（workflow 里的 CHECK_WORKER）、`CHECK_TOKEN` 与 Worker 的 `AUTH_PATH` 一致。浏览器直接访问带密钥的完整地址 `https://你的Worker/<密钥>/check?sstp=vpn:vpn@任意节点:端口` 看是否返回 JSON；裸地址返回 404 说明密钥路径已生效、必须带密钥访问。
@@ -217,8 +222,18 @@ EDGE_HOSTS = [
 ### 后台没同步上
 先看 Actions 日志里「Push hosts.txt to edgetunnel admin」那一步：若显示「跳过：未配置 EDT_ADMIN_PASSWORD」就是 Secret 没配；若登录失败，检查密码是否为 Worker 上的 `ADMIN` 变量值、后台地址（`EDT_BASE` / `EDT_DOMAIN`）是否写对。
 
-### 定时任务停了
-公开仓库 60 天无 commit 会被 GitHub 自动停用 schedule。正常情况下每次运行都会回写 `.github/last-run.txt` 产生 commit，不会触发；若停了，去 Actions 页点 Enable workflow 即可。
+### 定时任务不触发
+到 Actions → `VPN Gate Node Check` 页面点 **Enable workflow**（两种原因的表现都是「手动能跑、定时不跑」）：
+
+1. **fork 仓库（本仓库就是从 `hezhanleiok/gate` fork 来的）**：GitHub 对「公开仓库被 fork」出来的仓库**默认停用 schedule**——`workflow_dispatch` 能跑、`schedule` 一次都不跑，而且没有任何报错、邮件或通知，`.github/last-run.txt` 也永远不会有 commit。页面顶部一般有黄色横幅（`Workflows aren't being run on this forked repository`），点 **Enable workflow** 即可；若没看到横幅，先 **Disable workflow** 再 **Enable workflow** 强制重新注册定时。
+2. **公开仓库 60 天无 commit**：GitHub 会自动停用 schedule。正常情况下每次运行都会回写 `.github/last-run.txt` 产生 commit，不会触发；若停了，同样点 **Enable workflow**。
+
+> fork 里的定时任务可能被 GitHub 再次自动停用；而且 GitHub 的 cron 是「尽力而为」的（官方文档：高负载时可能延迟、甚至丢弃运行），所以别指望它严格每 30 分钟准点。
+>
+> **想彻底摆脱 fork 限制，推荐下一节「七、脱离 fork」**：新建一个非 fork 的仓库，一劳永逸。
+> 也可以不改仓库、只改触发方式：删掉 `schedule:` 只留 `workflow_dispatch:`，再用外部定时器（例如 Cloudflare Worker 的 cron + 一个 PAT）调
+> `POST https://api.github.com/repos/你的用户名/仓库名/actions/workflows/check.yml/dispatches`，body 为 `{"ref":"main"}`。
+> API 触发同样算仓库活动，不会再被「60 天无活动」规则停用，时间也更准时。
 
 ---
 
@@ -228,6 +243,51 @@ EDGE_HOSTS = [
 - **sub.txt 默认不发布**：它含完整 `vless://` 链接（等于 UUID），默认跳过生成并清理历史残留。`hosts.txt` / `chains.txt` 不含 UUID，可放心公开。确需公开订阅时：设 `PUBLISH_SUB=1` + Secret `EDT_UUID`（代价是 UUID 随之公开，可被他人拿去连你的 edgetunnel）。
 - **检测 Worker 加密钥路径**：Worker 侧设置 `AUTH_PATH` 变量后，所有请求必须以 `/<密钥>` 开头否则 404；本仓库 workflow 用 Secret `CHECK_TOKEN` 组装地址（与 `AUTH_PATH` 同值），未配 Secret 时回退裸地址。详见检测 Worker 仓库的 `_worker.js` 注释。
 - **后台 ADMIN 密码**：用长随机串（不要用用户名）。修改密码前先到 CF 面板确认已固定 `UUID` 环境变量，否则 UUID 会随密码变化、所有订阅链接失效。
+
+---
+
+## 七、脱离 fork：迁移到独立仓库（彻底解决「定时任务不触发」）
+
+GitHub **没有「unfork」按钮**：fork 关系一旦建立就无法在同一个仓库里解除，只能「新建一个非 fork 仓库 + 把内容推过去」。
+
+**不用改任何代码** —— 本项目所有地址都没写死仓库名：
+
+- workflow 里展示的站点地址用 Pages 官方输出 `steps.deployment.outputs.page_url`；
+- 清单头部的「固定地址」（`chains.txt` / `hosts.txt` / `sub.txt`）由 `vpngate.py` 从 Actions 自动注入的 `GITHUB_REPOSITORY` 推导（只有非 CI 环境才回退到写死值）；
+- 同步 edgetunnel 后台时优先读本次刚生成的本地 `public/hosts.txt`（`HOSTS_FILE`），与 Pages 地址无关。
+
+### 步骤
+
+1. **新建空白仓库**：打开 https://github.com/new → 填名字（如 `wh-gate`）→ 选 **Public** → **不要**勾 Add a README / .gitignore / license → Create repository。
+   > 必须是「空白新建」的仓库，它和上游 `hezhanleiok/gate` 没有任何 fork 关系，schedule 才不会被停用。
+   > 想保留原来的 `https://你的用户名.github.io/wh-gate/` 地址：先**删除**旧 fork，再新建**同名**仓库（GitHub 允许复用已删除仓库的名字），这样订阅网址一个字都不用改。
+
+2. **改 remote 并推送**（在本地仓库里执行）：
+
+   ```bash
+   git remote rename origin fork              # 旧 fork 留档 (没有 origin 这句就跳过)
+   git remote add origin https://github.com/你的用户名/新仓库名.git
+   git push -u origin main                    # 连历史一起推上去
+   ```
+
+   推送凭据：HTTPS 用 PAT（需 repo 权限）；也可换成 SSH 地址 `git@github.com:你的用户名/新仓库名.git`。
+   用 GitHub CLI 可以一条命令搞定：`gh repo create 新仓库名 --public --source . --push`。
+
+3. **补 Secrets**（**不会随 git 同步，必须重配**）：新仓库 Settings → Secrets and variables → Actions → New repository secret
+
+   | Secret | 值 | 是否必需 |
+   | :--- | :--- | :--- |
+   | `EDT_ADMIN_PASSWORD` | edgetunnel 后台 ADMIN 密码 | 自动同步后台必需 |
+   | `CHECK_TOKEN` | 与检测 Worker 的 `AUTH_PATH` 同值 | 推荐（不配则用裸地址） |
+   | `EDT_BASE` | edgetunnel 后台地址（缺省取 `EDT_DOMAIN`） | 可选 |
+   | `EDT_UUID` | edgetunnel 的 UUID（仅发布 sub.txt 时需要） | 可选 |
+
+4. **等第一次自动运行**：新仓库不是 fork，schedule 不会被停用。到 Actions 页看到 `VPN Gate Node Check`，且 `Event` 列出现 `schedule`（一般 30 分钟内）即迁移成功。公开仓库 Actions 默认开启，无需再点 Enable workflow。
+
+5. **停掉旧 fork（重要）**：旧仓库 Settings → 最底部 Danger Zone → **Archive this repository**（或删除）。否则两边会同时往 edgetunnel 后台写同一个托管块（哨兵注释 `# >>> wh-gate auto-sync >>>`），互相覆盖。
+
+### 迁移后要换的只有订阅网址
+Pages 地址变成 `https://你的用户名.github.io/新仓库名/`，之前手动记下的 `hosts.txt` 网址跟着换即可；edgetunnel 后台里的内容不用管——workflow 会用同样的哨兵注释整体替换旧块，不会重复堆叠。
 
 ---
 

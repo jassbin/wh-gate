@@ -1,9 +1,12 @@
 name: VPN Gate Node Check
 
 on:
-  # 定时检测: 默认每 30 分钟一次。改成每 60 分钟: cron: "0 * * * *"
+  # 定时检测: 默认每 30 分钟一次。
+  # 想改频率: 每 5 分钟 = "*/5 * * * *" (GitHub Actions 允许的最短间隔); 每 60 分钟 = "0 * * * *"。
+  # ⚠️ fork 仓库限制: 公开仓库被 fork 后 GitHub 默认停用该 fork 的 schedule,
+  #    表现为 workflow_dispatch 能跑、schedule 一次都不跑。修复见 README「定时任务不触发」。
   schedule:
-    - cron: "*/5 * * * *"
+    - cron: "*/30 * * * *"
   workflow_dispatch:
 
 permissions:
@@ -76,7 +79,8 @@ jobs:
         uses: actions/deploy-pages@v4
 
       - name: Show site URL
-        run: 'echo "site: https://whua898.github.io/wh-gate/ (deploy outcome: ${{ steps.deployment.outcome }})"'
+        # 用 Pages 部署步骤的官方输出, 不写死地址 (仓库改名/换账号后自动正确)
+        run: 'echo "site: ${{ steps.deployment.outputs.page_url }} (deploy outcome: ${{ steps.deployment.outcome }})"'
 
       - name: Push hosts.txt to edgetunnel admin (自定义优选IP, 自动化)
         env:
