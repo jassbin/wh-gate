@@ -10,7 +10,7 @@ on:
   #    ② 往默认分支推一次 commit (push 会重新注册定时, 同时重置计时);
   #    ③ 仍不跑就改用 README「五、常见问题 → 定时任务不触发」里的外部定时器方案。
   schedule:
-    - cron: "*/5 * * * *"
+    - cron: "*/30 * * * *"
   workflow_dispatch:
 
 permissions:
