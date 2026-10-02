@@ -92,6 +92,13 @@ ONLY_RESIDENTIAL = os.environ.get("ONLY_RESIDENTIAL", "1").strip().lower() in ("
 HTTP_TIMEOUT = int(os.environ.get("HTTP_TIMEOUT", "60"))              # 拉取数据源超时
 PUBLIC_DIR = os.environ.get("PUBLIC_DIR", os.path.join(REPO_DIR, "public"))
 TEMPLATE_HTML = os.path.join(REPO_DIR, "web", "index.html")
+# 清单头部「每 X 分钟重新检测」的 X 从何而来:
+# Actions 不会向 job 注入 cron 表达式, workflow 层直接声明一个自描述的环境变量即可
+# (改频率时只改 check.yml 里的 cron 和这里对应的 REFRESH_MINUTES, 生成的注释自动跟上)。
+REFRESH_MINUTES = os.environ.get("REFRESH_MINUTES", "30").strip() or "30"
+REFRESH_LABEL = f"每 {REFRESH_MINUTES} 分钟重新检测"
+# 「名字固定, 地址自动换」类注释的后半句, 由 REFRESH_MINUTES 派生 (默认「30 分钟自动更换」)
+REFRESH_CHANGE_LABEL = f"{REFRESH_MINUTES} 分钟自动更换"
 
 # 出口数据中心的关键词启发 (判断"是否住宅 IP"用, 页面标注为估算)
 DATA_CENTER_ORG_KEYWORDS = [
@@ -457,17 +464,17 @@ CHAIN_URL = _env("CHAIN_URL", f"{PAGES_BASE}/chains.txt")
 
 def build_chains_text(data):
     """生成 edgetunnel 链式代理清单: 按国家分组, 每国独立编号, 仅收录住宅节点 (机房/未知已过滤)。
-    每行 = 「名字 + $sstp://vpn:vpn@host:port」, 名字不变, 指令每 30 分钟自动换。"""
+    每行 = 「名字 + $sstp://vpn:vpn@host:port」, 名字不变, 指令随 REFRESH_MINUTES 自动换。"""
     countries = data["countries"]
     lines = [
         "# VPN Gate SSTP 节点 -> edgetunnel 链式代理清单 (仅住宅)",
-        f"# 自动更新: {data['generated_at']} (每 30 分钟重新检测)",
+        f"# 自动更新: {data['generated_at']} ({REFRESH_LABEL})",
         f"# 固定地址: {CHAIN_URL}",
         "#",
         "# 用法: 在 edgetunnel 节点备注里直接粘贴下面任意一行 (名字与指令连写, 逗号分隔多行)",
         "#   例: 日本-住宅-01$sstp://vpn:vpn@vpnxxx.opengw.net:443",
         "# 非住宅需求请用 ed 其他节点补; 本清单只收录住宅",
-        "# 名字保持不变, 只有 $sstp:// 后面的地址每 30 分钟自动更换",
+        f"# 名字保持不变, 只有 $sstp:// 后面的地址{REFRESH_CHANGE_LABEL}",
         "# 账号密码固定 vpn:vpn ; 端口必须保留",
         "# ========================================================",
     ]
@@ -512,19 +519,19 @@ HOSTS_URL = _env("HOSTS_URL", f"{PAGES_BASE}/hosts.txt")
 
 def build_hosts_text(data):
     """生成可直接粘贴到 edgetunnel 后台「自定义优选IP」框的清单。
-    每行 = 入口地址#名字$sstp://... ; 名字固定, 底下 SSTP 节点每 30 分钟自动换。"""
+    每行 = 入口地址#名字$sstp://... ; 名字固定, 底下 SSTP 节点随 REFRESH_MINUTES 自动换。"""
     countries = data["countries"]
     # 入口: 优选域名循环分配; 可用 HOSTS_ENTRY 覆盖(逗号分隔), 用 EDGE_HOSTS 环境变量覆盖整张默认表
     _entry = os.environ.get("HOSTS_ENTRY", "").strip()
     edge = [e.strip() for e in _entry.split(",") if e.strip()] or EDGE_HOSTS or [f"{EDT_DOMAIN}:443"]
     lines = [
         "# edgetunnel「自定义优选IP」清单 (仅住宅, 整段复制, 追加到后台现有内容后面)",
-        f"# 自动更新: {data['generated_at']} (每 30 分钟重新检测)",
+        f"# 自动更新: {data['generated_at']} ({REFRESH_LABEL})",
         f"# 固定地址: {HOSTS_URL}",
         "# 每行 = 入口地址#名字$sstp://vpn:vpn@节点:端口",
         "# 入口用 7 个实测可用优选域名循环分配",
         "# 名字 = 国家-住宅-编号 (仅住宅; 非住宅需求请用 ed 其他节点补)",
-        "# 名字固定; 只有 $sstp:// 后面的节点地址每 30 分钟自动更换",
+        f"# 名字固定; 只有 $sstp:// 后面的节点地址{REFRESH_CHANGE_LABEL}",
         "# 账号密码固定 vpn:vpn ; 节点端口必须保留",
         "# ========================================================",
     ]
@@ -604,10 +611,10 @@ def build_sub_text(data):
     countries = data["countries"]
     lines = [
         "# edgetunnel 完整订阅 (vless://) —— 填进后台「订阅链接」URL",
-        f"# 自动更新: {data['generated_at']} (每 30 分钟重新检测)",
+        f"# 自动更新: {data['generated_at']} ({REFRESH_LABEL})",
         f"# 固定地址: {SUB_URL}",
         f"# 节点域名: {EDT_DOMAIN} (传输 ws / TLS / fingerprint {EDT_FINGERPRINT})",
-        "# 名字固定; $sstp:// 链式代理(编码在 path)每 30 分钟自动更换",
+        f"# 名字固定; $sstp:// 链式代理(编码在 path){REFRESH_CHANGE_LABEL}",
         "# 账号密码固定 vpn:vpn ; 节点端口已编码进 path",
         "# ========================================================",
     ]
