@@ -6,4 +6,12 @@ __pycache__/
 # IDE
 .idea/
 
+# 本地虚拟环境
+.venv/
+venv/
+
+# Cloudflare Worker 本地状态 (tools/cloudflare-worker-timer)
+tools/cloudflare-worker-timer/.wrangler/
+tools/cloudflare-worker-timer/node_modules/
+
 Copy

@@ -1,16 +1,17 @@
 name: VPN Gate Node Check
 
 on:
-  # 定时检测: 默认每 30 分钟一次。
-  # 想改频率: 每 5 分钟 = "*/5 * * * *" (GitHub Actions 允许的最短间隔); 每 60 分钟 = "0 * * * *"。
-  # ⚠️ fork 仓库限制: 公开仓库被 fork 后 GitHub 默认停用该 fork 的 schedule,
-  #    表现为 workflow_dispatch 能跑、schedule 一次都不跑。修复见 README「定时任务不触发」。
-  # ⚠️ 非 fork 也可能一次 schedule 都不跑: GitHub 侧「定时注册」丢失 (官方确认过同类故障)。
-  #    补救顺序: ① Actions → Disable workflow → Enable workflow 强制重注册;
-  #    ② 往默认分支推一次 commit (push 会重新注册定时, 同时重置计时);
-  #    ③ 仍不跑就改用 README「五、常见问题 → 定时任务不触发」里的外部定时器方案。
-  schedule:
-    - cron: "*/30 * * * *"
+  # ⚠️ 这里刻意【不用】GitHub 自带的 schedule: 它的定时是「尽力而为」的——
+  #    高负载时会被延迟，甚至整个丢弃。本仓库实测: cron "*/5 * * * *" 在仓库存在
+  #    数小时内 event=schedule 计数恒为 0 (同账号里 cron 稀疏的仓库只是「迟到几小时」,
+  #    而 */5 的每个 5 分钟槽位在积压清空前就过期、被丢掉了)。
+  #    因此改用【外部定时器】按点调 workflow_dispatch 触发: 见 README「八、外部定时器」。
+  #    (外部定时器 = Cloudflare Worker 的 cron / cron-job.org 调
+  #     POST .../actions/workflows/check.yml/dispatches, body {"ref":"main"}。)
+  # 想改回 GitHub 自带定时: 取消下面 2 行注释即可——但必须与外部定时器【二选一】,
+  # 否则两边同时触发会重复运行 (外部定时器仍在时, 请勿放开)。
+  # schedule:
+  #   - cron: "*/30 * * * *"
   workflow_dispatch:
 
 permissions:
@@ -90,9 +91,10 @@ jobs:
           CHECK_CONCURRENCY: "32"
           CHECK_TIMEOUT: "90"
           # 生成的 hosts.txt/chains.txt/sub.txt 头部注释写「每 X 分钟重新检测」:
-          # 必须与上面的 cron 间隔一致 (改 cron 时同步改这里, 否则注释与实际频率对不上)。
-          # Actions 不会把 cron 表达式注入 job, 只能用这个自描述变量显式声明。
-          REFRESH_MINUTES: "5"
+          # 必须与实际触发间隔一致——现在由外部定时器决定, 改频率时同步改这里,
+          # 否则注释与实际频率对不上。
+          # (Actions 不会把 cron 表达式注入 job, 只能用这个自描述变量显式声明。)
+          REFRESH_MINUTES: "30"
           # sub.txt 订阅含 UUID: 默认不发布 (PUBLISH_SUB 未设置即跳过); 需要时配 Secret EDT_UUID 并加 PUBLISH_SUB=1
           EDT_UUID: ${{ secrets.EDT_UUID }}
 
@@ -128,10 +130,12 @@ jobs:
           python push_edt_hosts.py
 
       - name: Commit run state (keep scheduled workflow alive)
-        # 每 30 分钟跑一次也产生一次 commit -> 仓库永远有"活动",
+        # 只有当 workflow 由 GitHub 自带 schedule 触发时才回写, 让仓库保持"活动",
         # 防止 GitHub 因"公开仓库 60 天无活动"自动停用定时任务。
-        # 这只是触发器，不影响 push 并发（失败时不阻塞）。
-        # 只有定时触发才提交, 手动 workflow_dispatch 不提交。
+        # ⚠️ 现在改用外部定时器 (workflow_dispatch) 触发, 本步不会执行——
+        #    因为没有 GitHub 自带 schedule 可被停用, 也就不再需要它。
+        #    刻意保留 if 条件 (不用 always()): 将来若恢复 schedule, 它自动恢复作用。
+        # 这只是一次触发器 commit，不影响 push 并发（失败时不阻塞）。
         if: github.event_name == 'schedule'
         run: |
           git config user.name "github-actions[bot]"

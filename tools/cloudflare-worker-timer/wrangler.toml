@@ -1,0 +1,23 @@
+# wh-gate 外部定时器 (Cloudflare Worker) 的 wrangler 配置
+# 部署: 在本目录执行 `wrangler deploy`
+# 密钥: 执行 `wrangler secret put GH_PAT` 写入 PAT (不要写在本文件里)
+
+name = "wh-gate-timer"
+main = "worker.js"
+compatibility_date = "2024-11-01"
+workers_dev = true
+
+# 触发频率: 每 30 分钟一次。
+# ⚠️ 必须与 .github/workflows/check.yml 里的 REFRESH_MINUTES 保持一致, 否则产物
+#    头部注释写的「每 X 分钟」会与实际频率对不上。
+#    想改成 60 分钟: "0 * * * *" ; 想改成 5 分钟: "*/5 * * * *"。
+[triggers]
+crons = ["*/30 * * * *"]
+
+# 非敏感变量 (改成你自己的仓库/分支)
+[vars]
+REPO_OWNER = "whua898"
+REPO = "wh-gate"
+WORKFLOW_FILE = "check.yml"
+REF = "main"
+# MANUAL_TOKEN = "换成一串随机字符"   # 可选: 保护手动 GET /run

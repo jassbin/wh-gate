@@ -2,7 +2,7 @@
 
 自动抓取 [VPN Gate](https://www.vpngate.net/) 的 SSTP 节点，调用检测 Worker 逐个验证可用性，按国家分组（仅收录住宅 IP，非住宅场景用 ed 其他节点），生成可直接粘贴进 edgetunnel 后台的链式代理清单。**每 30 分钟自动更新一次。**
 
-> 核心价值：VPN Gate 的 SSTP 节点 30 分钟就换一批，手动测试筛选太痛苦。本仓库把它全自动了——GitHub Actions 每 30 分钟自动检测并推送进 edgetunnel 后台，你只需在客户端里更新订阅。
+> 核心价值：VPN Gate 的 SSTP 节点 30 分钟就换一批，手动测试筛选太痛苦。本仓库把它全自动了——外部定时器每 30 分钟触发一次 GitHub Actions（GitHub 自带的 `schedule` 会延迟甚至丢任务，见「八、外部定时器」），自动检测并推送进 edgetunnel 后台，你只需在客户端里更新订阅。
 
 ---
 
@@ -23,7 +23,7 @@
 
 ```text
 VPN Gate 官方源
-      │  (每 30 分钟，GitHub Actions 定时抓取)
+      │  (每 30 分钟，由外部定时器触发 GitHub Actions 抓取)
       ▼
 筛选 SSTP 节点 → 去重
       │
@@ -37,7 +37,7 @@ VPN Gate 官方源
       ▼
 生成 hosts.txt + chains.txt + data.json + index.html (走 GitHub Pages 发布)
       │  workflow 自动同步进 edgetunnel 后台「自定义优选IP」
-      │  每次运行回写 .github/last-run.txt（防 60 天停用定时任务）
+      │  (GitHub 自带 schedule 触发才回写 .github/last-run.txt；改用外部定时器后不写)
       │  edgetunnel 自动把链式代理指令编码进节点 path
 
 ```
@@ -71,7 +71,7 @@ VPN Gate 官方源
 
 在 GitHub 上打开本仓库，点 **Fork**，复制到你账号下（变成 你的GitHub用户名/仓库名）。
 
-> 注意：**fork 出来的仓库，GitHub 默认停用定时任务**（手动能跑、定时一次都不跑，且没有任何提示）。fork 后务必到 Actions 页点一次 **Enable workflow**；想彻底避开 fork 这套限制，按「七、脱离 fork」新建独立仓库。
+> 注意：**fork 出来的仓库，GitHub 默认停用自带的定时任务**（手动能跑、定时一次都不跑，且没有任何提示）。本项目默认改用**外部定时器**触发（见「八、外部定时器」），不受此限制；若你改用 GitHub 自带 `schedule`，fork 后务必到 Actions 页点一次 **Enable workflow**。
 
 ### 第 3 步：修改配置（重点，要改的配置全在这）
 
@@ -122,11 +122,12 @@ https://你的GitHub用户名.github.io/仓库名/hosts.txt
 
 ### 自动同步（默认，GitHub 全自动，本机无需常驻）
 
-配好 Secrets 后什么都不用做：本仓库 `VPN Gate Node Check` workflow 每 30 分钟运行一次 ——
-拉节点 → 检测 → 生成 `hosts.txt` → 发布到 Pages → 同步进 edgetunnel 后台「自定义优选IP」→ 回写 `.github/last-run.txt`（防 GitHub 因"公开仓库 60 天无活动"停用定时任务）。
+配好 Secrets 后什么都不用做：外部定时器每 30 分钟触发一次本仓库 `VPN Gate Node Check` workflow ——
+拉节点 → 检测 → 生成 `hosts.txt` → 发布到 Pages → 同步进 edgetunnel 后台「自定义优选IP」。
 你唯一要做的：在客户端里更新/刷新订阅（订阅地址是 edgetunnel 后台给你的那个），然后测延迟选节点用。
 
-> ⚠️ **你 fork 出来的仓库**，GitHub **默认停用定时任务**：第一次用请先到 Actions → `VPN Gate Node Check` → **Enable workflow**，否则只会手动跑、定时永不触发（详见「五、常见问题 → 定时任务不触发」）。fork 里的定时任务还可能被 GitHub 再次自动停用，想一劳永逸见「七、脱离 fork」。
+> ⚠️ **触发方式说明**：本项目默认**不用 GitHub 自带的 `schedule`**（它会延迟、甚至丢任务），而是用**外部定时器**按点调 `workflow_dispatch`，部署方法见「八、外部定时器」。
+> 如果你改回自带 `schedule`：fork 仓库默认会被停用，第一次需到 Actions → `VPN Gate Node Check` → **Enable workflow**（详见「五、常见问题 → 定时任务不触发」）。
 
 ### 手工同步（备用：自动同步没配好时才用，约 1 分钟）
 
@@ -215,9 +216,9 @@ EDGE_HOSTS = [
 ### 全部 -1
 检查：edgetunnel 是否部署好、域名是否解析到 Cloudflare、UUID 是否填对、传输协议是否对得上（默认按 ws/TLS 生成）。
 
-### 30 分钟没更新
-到 Actions 页看最近一次运行是否成功、`Event` 里有没有 `schedule`（cron 见 .github/workflows/check.yml，当前 `*/30 * * * *`）。
-如果只有 `workflow_dispatch`、从来没有 `schedule` 运行 → 见下条「定时任务不触发」。
+### 长时间没更新
+到 Actions 页看最近一次运行是否成功、以及 `Event` 列。本项目默认由**外部定时器**触发，所以 `Event` 通常是 `workflow_dispatch`（若你改用 GitHub 自带 `schedule`，则应为 `schedule`）。
+如果一直没有自动运行 → 见下条「定时任务不触发」。
 
 ### 检测 Worker 报错
 确认 Worker 部署成功、域名填对（workflow 里的 CHECK_WORKER）、`CHECK_TOKEN` 与 Worker 的 `AUTH_PATH` 一致。浏览器直接访问带密钥的完整地址 `https://你的Worker/<密钥>/check?sstp=vpn:vpn@任意节点:端口` 看是否返回 JSON；裸地址返回 404 说明密钥路径已生效、必须带密钥访问。
@@ -233,17 +234,16 @@ EDGE_HOSTS = [
 > workflow 开头的 `Preflight` 步骤会**提前**检查 Pages 是否已启用，未启用就直接报错并给出中文指引，所以正常不会再白等几分钟才在 `Configure Pages` 处失败。
 
 ### 定时任务不触发
-到 Actions → `VPN Gate Node Check` 页面点 **Enable workflow**（两种原因的表现都是「手动能跑、定时不跑」）：
 
-1. **你 fork 出来的仓库**：GitHub 对「公开仓库被 fork」出来的仓库**默认停用 schedule**——`workflow_dispatch` 能跑、`schedule` 一次都不跑，而且没有任何报错、邮件或通知，`.github/last-run.txt` 也永远不会有 commit。页面顶部一般有黄色横幅（`Workflows aren't being run on this forked repository`），点 **Enable workflow** 即可；若没看到横幅，先 **Disable workflow** 再 **Enable workflow** 强制重新注册定时。
+**本项目默认用外部定时器触发**（见「八、外部定时器」），所以「定时不触发」通常先查那套外部定时器：Worker 是否部署、cron 是否生效、`GH_PAT` 权限对不对、Actions 的 `Event` 列是不是 `workflow_dispatch`。
+
+下面两条是**改用 GitHub 自带 `schedule`** 时的常见原因（表现都是「手动能跑、定时不跑」）：
+
+1. **fork 出来的仓库**：GitHub 对「公开仓库被 fork」出来的仓库**默认停用 schedule**——`workflow_dispatch` 能跑、`schedule` 一次都不跑，而且没有任何报错、邮件或通知，`.github/last-run.txt` 也永远不会有 commit。页面顶部一般有黄色横幅（`Workflows aren't being run on this forked repository`），点 **Enable workflow** 即可；若没看到横幅，先 **Disable workflow** 再 **Enable workflow** 强制重新注册定时。
 2. **公开仓库 60 天无 commit**：GitHub 会自动停用 schedule。正常情况下每次运行都会回写 `.github/last-run.txt` 产生 commit，不会触发；若停了，同样点 **Enable workflow**。
 
-> fork 里的定时任务可能被 GitHub 再次自动停用；而且 GitHub 的 cron 是「尽力而为」的（官方文档：高负载时可能延迟、甚至丢弃运行），所以别指望它严格每 30 分钟准点。
->
-> **想彻底摆脱 fork 限制，推荐下一节「七、脱离 fork」**：新建一个非 fork 的仓库，一劳永逸。
-> 也可以不改仓库、只改触发方式：删掉 `schedule:` 只留 `workflow_dispatch:`，再用外部定时器（例如 Cloudflare Worker 的 cron + 一个 PAT）调
-> `POST https://api.github.com/repos/你的用户名/仓库名/actions/workflows/check.yml/dispatches`，body 为 `{"ref":"main"}`。
-> API 触发同样算仓库活动，不会再被「60 天无活动」规则停用，时间也更准时。
+> **更隐蔽的一种：非 fork、配置全对，`schedule` 仍恒为 0 次。** 本仓库实测就是这种情况——非 fork、workflow 状态 `active`、cron 字节正确、Disable→Enable + push 重注册都试过，`event=schedule` 计数依旧为 0；对比发现同账号里 cron 稀疏的仓库只是「迟到几小时」，而 `*/5` 这种高频 cron 的每个槽位在调度积压清空前就过期、被直接丢弃（官方文档也写明 schedule「高负载时可能延迟、甚至丢弃运行」）。
+> 这类问题靠 GitHub 自带定时基本无解，可靠解法是**外部定时器**（见「八、外部定时器」），不再依赖 GitHub 的调度器。
 
 ---
 
@@ -256,7 +256,7 @@ EDGE_HOSTS = [
 
 ---
 
-## 七、脱离 fork：迁移到独立仓库（彻底解决「定时任务不触发」）
+## 七、脱离 fork：迁移到独立仓库（可选；改用 GitHub 自带 schedule 时推荐）
 
 GitHub **没有「unfork」按钮**：fork 关系一旦建立就无法在同一个仓库里解除，只能「新建一个非 fork 仓库 + 把内容推过去」。
 
@@ -269,7 +269,7 @@ GitHub **没有「unfork」按钮**：fork 关系一旦建立就无法在同一�
 ### 步骤
 
 1. **新建空白仓库**：打开 https://github.com/new → 填名字（如 `wh-gate`）→ 选 **Public** → **不要**勾 Add a README / .gitignore / license → Create repository。
-   > 必须是「空白新建」的仓库，它和上游 `hezhanleiok/gate` 没有任何 fork 关系，schedule 才不会被停用。
+   > 必须是「空白新建」的仓库，它和上游 `hezhanleiok/gate` 没有任何 fork 关系；这样改用**GitHub 自带 schedule** 时才不会被 fork 规则停用（若继续用外部定时器，其实 fork 也能触发，见「八、外部定时器」）。
    > 想保留原来的 `https://你的用户名.github.io/wh-gate/` 地址：先**删除**旧 fork，再新建**同名**仓库（GitHub 允许复用已删除仓库的名字），这样订阅网址一个字都不用改。
 
 2. **推送到新仓库**（在本地仓库里执行）：
@@ -300,10 +300,10 @@ GitHub **没有「unfork」按钮**：fork 关系一旦建立就无法在同一�
    | `EDT_BASE` | edgetunnel 后台地址（缺省取 `EDT_DOMAIN`） | 可选 |
    | `EDT_UUID` | edgetunnel 的 UUID（仅发布 sub.txt 时需要） | 可选 |
 
-4. **先手动跑一次**（推送本身不会触发运行，因为 `on:` 只有 `schedule` + `workflow_dispatch`）：Actions → `VPN Gate Node Check` → **Run workflow**。
+4. **先手动跑一次**（推送本身不会触发运行，因为 `on:` 只有 `workflow_dispatch`）：Actions → `VPN Gate Node Check` → **Run workflow**。
    运行前请先确认 Pages 已启用（`Settings → Pages → Source = GitHub Actions`）——workflow 开头的 `Preflight` 步骤会检查，未启用会直接报错提示（GitHub 禁止 Actions 自动启用 Pages，只能手动开一次）。跑完会生成 `hosts.txt`/`chains.txt`/`data.json` 并发布，是确认 Secrets 配对了没有的最快方式。
 
-5. **确认定时已生效**：新仓库不是 fork，schedule 不会被停用（Actions 页 workflow 状态应为 `active`，也没有黄色横幅）。之后 Actions 列表里 `Event` 列出现 `schedule`（一般 30 分钟内）即迁移成功。
+5. **确认定时已生效**：用**外部定时器**时，Actions 列表里 `Event` 列出现 `workflow_dispatch`（见「八、外部定时器」）；若改用 **GitHub 自带 schedule**，新仓库不是 fork、应不会被停用（状态 `active`、无黄色横幅），`Event` 列出现 `schedule` 即成功——但它可能延迟甚至丢任务，长期看仍推荐外部定时器。
 
 6. **确认旧 fork 已清理**：旧仓库 Settings → 最底部 Danger Zone → **Archive this repository**（或删除）。否则两边会同时往 edgetunnel 后台写同一个托管块（哨兵注释 `# >>> wh-gate auto-sync >>>`），互相覆盖。
 
@@ -312,5 +312,43 @@ Pages 地址变成 `https://你的用户名.github.io/新仓库名/`，之前手
 
 ---
 
-*流水线：GitHub Actions（每 30 分钟 cron） → vpngate.py → 检测 Worker → GitHub Pages*
+## 八、外部定时器（默认触发方式）
+
+GitHub 自带的 `schedule` 是「尽力而为」的：高负载时会**延迟**、甚至**整个丢弃**任务。本项目实测 `cron: "*/5 * * * *"` 在 `event=schedule` 上恒为 0 次（非 fork、状态 `active`、cron 字节正确也一样；同账号里 cron 稀疏的仓库只是「迟到几小时」，而高频 cron 的每个槽位会在调度积压清空前就过期、被直接丢弃）。
+
+所以本项目默认**改用外部定时器**：workflow 里只留 `workflow_dispatch:`（`check.yml` 里的 `schedule:` 已注释掉），再由外部定时器按点调 GitHub 的 dispatch API：
+
+```text
+POST https://api.github.com/repos/你的用户名/仓库名/actions/workflows/check.yml/dispatches
+Header: Authorization: Bearer <PAT>     Accept: application/vnd.github+json
+Body:   {"ref":"main"}
+```
+
+> PAT：classic 勾 `repo` + `workflow`；fine-grained 选本仓库、`Actions = Read and write`。触发成功 GitHub 返回 `204`。
+
+### 现成的 Cloudflare Worker（本仓库已带）
+
+`tools/cloudflare-worker-timer/` 里是可直接部署的 Worker（cron + PAT），附带详细步骤（含**不用命令行**的控制台方式）：
+
+```bash
+cd tools/cloudflare-worker-timer
+wrangler deploy                 # 按 wrangler.toml 建 Worker + Cron Trigger（默认 */30）
+wrangler secret put GH_PAT       # 粘贴 PAT
+```
+
+改频率/仓库：编辑该目录的 `wrangler.toml` 后重新 `wrangler deploy`；细节见该目录的 `README.md`。
+
+### 其它选择
+
+- **cron-job.org**：免费，新建 job，方法 `POST`，URL 填上面的 API 地址，Header 加 `Authorization: Bearer <PAT>` 与 `Accept: application/vnd.github+json`，Body 填 `{"ref":"main"}`。
+- **本机计划任务 / 任意常驻脚本**：发同一个 POST 即可。
+
+### 注意
+
+- 外部定时器产生的是 `workflow_dispatch` 事件，与 GitHub 自带 `schedule` **二选一**（同时启用会重复运行）。
+- 它**不写** `.github/last-run.txt`（该文件只在自带 `schedule` 下回写，用于防「60 天无活动」停用；改用外部定时器后不需要）。
+- 频率改了要同步改 `check.yml` 的 `REFRESH_MINUTES`，产物头部「每 X 分钟」才会与实际一致。
+
+---
+*流水线：外部定时器（每 30 分钟） → GitHub Actions → vpngate.py → 检测 Worker → GitHub Pages*
 
