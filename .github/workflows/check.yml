@@ -6,7 +6,7 @@ on:
   # ⚠️ fork 仓库限制: 公开仓库被 fork 后 GitHub 默认停用该 fork 的 schedule,
   #    表现为 workflow_dispatch 能跑、schedule 一次都不跑。修复见 README「定时任务不触发」。
   schedule:
-    - cron: "*/30 * * * *"
+    - cron: "*/5 * * * *"
   workflow_dispatch:
 
 permissions:
