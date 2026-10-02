@@ -5,6 +5,10 @@ on:
   # 想改频率: 每 5 分钟 = "*/5 * * * *" (GitHub Actions 允许的最短间隔); 每 60 分钟 = "0 * * * *"。
   # ⚠️ fork 仓库限制: 公开仓库被 fork 后 GitHub 默认停用该 fork 的 schedule,
   #    表现为 workflow_dispatch 能跑、schedule 一次都不跑。修复见 README「定时任务不触发」。
+  # ⚠️ 非 fork 也可能一次 schedule 都不跑: GitHub 侧「定时注册」丢失 (官方确认过同类故障)。
+  #    补救顺序: ① Actions → Disable workflow → Enable workflow 强制重注册;
+  #    ② 往默认分支推一次 commit (push 会重新注册定时, 同时重置计时);
+  #    ③ 仍不跑就改用 README「五、常见问题 → 定时任务不触发」里的外部定时器方案。
   schedule:
     - cron: "*/5 * * * *"
   workflow_dispatch:
