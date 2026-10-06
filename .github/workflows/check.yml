@@ -87,7 +87,7 @@ jobs:
         env:
           # 已部署的检测 Worker: 密钥路径来自仓库 Secret CHECK_TOKEN (与 Worker 的 AUTH_PATH 变量同值)
           # 未配置 Secret 时回退裸路径 (仅当 Worker 未设置 AUTH_PATH 时可用)
-          CHECK_WORKER: ${{ secrets.CHECK_TOKEN && format('https://chks5.8dy.xx.kg/{0}/check?sstp=vpn:vpn@', secrets.CHECK_TOKEN) || 'https://chks5.8dy.xx.kg/check?sstp=vpn:vpn@' }}
+          CHECK_WORKER: ${{ secrets.CHECK_TOKEN && format('https://wh-gate.zhaizibin.workers.dev/{0}/check?sstp=vpn:vpn@', secrets.CHECK_TOKEN) || 'https://wh-gate.zhaizibin.workers.dev/check?sstp=vpn:vpn@' }}
           CHECK_CONCURRENCY: "32"
           CHECK_TIMEOUT: "90"
           # 生成的 hosts.txt/chains.txt/sub.txt 头部注释写「每 X 分钟重新检测」:
