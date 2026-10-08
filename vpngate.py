@@ -25,8 +25,11 @@ import io
 import json
 import os
 import re
+import socket
+import ssl
 import sys
 import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from urllib.parse import quote
@@ -83,6 +86,9 @@ VPNGATE_MIRROR = _env(
 )
 # 已部署的 Cloudflare Worker 检测接口 (GET /check?sstp=vpn:vpn@host:port, 实测确认)
 WORKER_CHECK_URL = _env("CHECK_WORKER", "https://你的检测Worker域名/check?sstp=vpn:vpn@")  # ⚠️ 必改：换成你自己的检测 Worker 域名
+# 检测模式: direct = 本机直连检测 (不依赖 Cloudflare, 默认); worker = 经 Cloudflare Worker 检测
+CHECK_MODE = os.environ.get("CHECK_MODE", "direct").strip().lower()
+DIRECT_SSTP_TIMEOUT = float(os.environ.get("DIRECT_SSTP_TIMEOUT", "15"))  # 直连单节点超时 (秒)
 CONCURRENCY = max(1, int(os.environ.get("CHECK_CONCURRENCY", "32")))   # 与 Worker 网页端一致的并发模型
 CHECK_TIMEOUT = float(os.environ.get("CHECK_TIMEOUT", "90"))          # 单请求客户端超时 (秒)
 MAX_CHECK_NODES = int(os.environ.get("MAX_CHECK_NODES", "0"))         # 0=不限; 本地测试可设小值
@@ -348,9 +354,132 @@ def classify_network(host, exit_org, is_datacenter=None):
     return "unknown"
 
 
+# ---------------------------------------------------------------------------
+# 直连检测 (不依赖 Cloudflare Worker)
+# ---------------------------------------------------------------------------
+def _direct_sstp_check(host, port):
+    """TCP + TLS + SSTP HTTP 握手。返回 (success, latency_ms, error)。"""
+    start = time.monotonic()
+    sock = None
+    try:
+        sock = socket.create_connection((host, port), timeout=DIRECT_SSTP_TIMEOUT)
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        tls = ctx.wrap_socket(sock, server_hostname=host)
+        tls.settimeout(DIRECT_SSTP_TIMEOUT)
+        sock = tls
+        corr_id = str(uuid.uuid4()).upper()
+        req = (
+            f"SSTP_DUPLEX_POST /sra_{{BA195980-CD49-458b-9E23-C84EE0ADCD75}}/ HTTP/1.1\r\n"
+            f"Host: {host}\r\n"
+            f"Content-Length: 18446744073709551615\r\n"
+            f"SSTPCORRELATIONID: {{{corr_id}}}\r\n"
+            f"\r\n"
+        )
+        tls.sendall(req.encode())
+        data = b""
+        while b"\r\n" not in data:
+            chunk = tls.recv(4096)
+            if not chunk:
+                break
+            data += chunk
+            if len(data) > 8192:
+                break
+        latency_ms = int((time.monotonic() - start) * 1000)
+        status_line = data.split(b"\r\n", 1)[0].decode("latin1", errors="replace")
+        if re.match(r"HTTP/\d(?:\.\d)?\s+2\d\d", status_line, re.I):
+            return True, latency_ms, None
+        return False, latency_ms, f"SSTP handshake rejected: {status_line[:80]}"
+    except socket.timeout:
+        return False, None, "connection timeout"
+    except ConnectionRefusedError:
+        return False, None, "connection refused"
+    except Exception as e:
+        return False, None, f"{type(e).__name__}: {e}"[:100]
+    finally:
+        if sock:
+            try:
+                sock.close()
+            except Exception:
+                pass
+
+
+def _direct_ip_lookup(ip):
+    """ip-api.com 查 ASN/地理。返回 dict 或 None。"""
+    try:
+        r = requests.get(
+            f"http://ip-api.com/json/{ip}?fields=status,country,countryCode,city,org,isp,as,query",
+            timeout=10,
+            headers={"User-Agent": "Mozilla/5.0 (gate-checker)"},
+        )
+        j = r.json()
+        if j.get("status") != "success":
+            return None
+        org = j.get("org") or j.get("isp") or ""
+        asn_num = None
+        asn_str = j.get("as") or ""
+        if asn_str.startswith("AS"):
+            try:
+                asn_num = int(asn_str.split()[0][2:])
+            except (ValueError, IndexError):
+                pass
+        return {
+            "ip": j.get("query") or ip,
+            "country": j.get("country"),
+            "country_code": j.get("countryCode"),
+            "city": j.get("city"),
+            "asn": asn_num,
+            "org": org,
+        }
+    except Exception:
+        return None
+
+
+def check_one_direct(node):
+    """直连模式：本机直接检测 SSTP 节点，不经过 Cloudflare Worker。
+    返回与 check_one 相同格式的 dict。"""
+    out = dict(node)
+    out["protocol"] = "sstp"
+    out["link"] = f"sstp://vpn:vpn@{node['host']}:{node['port']}"
+    out["status"] = "failed"
+    out["checked_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    out["exit"] = None
+    out["residential"] = "unknown"
+    out["check_mode"] = "direct"
+
+    ok, latency_ms, err = _direct_sstp_check(node["host"], int(node.get("port") or 443))
+    out["success"] = ok
+    out["status"] = "success" if ok else "failed"
+    out["latency_ms"] = latency_ms
+    out["error"] = err
+    if not ok:
+        return out
+
+    # 存活才查 IP 信息（省配额）
+    info = _direct_ip_lookup(node.get("ip") or node["host"])
+    if info:
+        out["exit"] = {
+            "ip": info["ip"],
+            "country": info["country"],
+            "country_code": info["country_code"],
+            "city": info["city"],
+            "asn": info["asn"],
+            "org": info["org"],
+            "type": None,
+            "is_datacenter": None,  # 直连模式无精确标志，靠 classify_network 关键词判断
+        }
+        out["residential"] = classify_network(out["host"], info["org"], None)
+    else:
+        out["residential"] = classify_network(out["host"], None, None)
+    return out
+
+
 def check_one(node, session):
     """调用 Worker 检测单节点。返回节点+检测结果的合并 dict。
     单节点失败 (网络错误/非 200/坏 JSON) 不会抛出, 统一记 success=False。"""
+    if CHECK_MODE == "direct":
+        return check_one_direct(node)
     url = WORKER_CHECK_URL + quote(f"{node['host']}:{node['port']}", safe="")
     out = dict(node)
     out["protocol"] = "sstp"
